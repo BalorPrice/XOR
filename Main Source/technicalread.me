@@ -1,0 +1,95 @@
+﻿XOR! Converted by Tobermory 2012
+------------------------------------------
+
+
+This is a Sam Coupé conversion of the Spectrum/BBC game by Astral/Logotron 1986.  Nothing has been reverse-engineered, I started from scratch.
+
+Standard disclaimer - this game comes without any warranty of any kind, have fun.  It runs on SimCoupé so the worst damage you can do is crash an emulator.
+
+
+
+CONTENTS
+
+As you are reading this you have downloaded all the source code including makefiles (The other download is the completed product only).  This contains:
+
+* make.bat - makefile.  I compiled it with pyz80 which you can download from Andrew Collier's Intensity website.  Currently it is here: http://www.intensity.org.uk/samcoupe/pyz80.html.  The command-line interface, and therefore the ability to do a one-click/keyboard shortcut compile and run, was one of the reasons I used pyz80 instead of David Brant's Jam Assembler (which is very good too).
+
+* Z80 format.xml - I used Notepad++ to write in, so I found a template for formatting Z80 and tweaked it.  Beware!  It's very brown.
+
+* gfx.mgt - the disk image where I made the graphics.  I copied them from screenshots and the like, then spritzed them up a little.  This also includes little basic routines for getting the right format.  I took some shortcuts here, normally I wouldn't be so wasteful with memory.
+
+* dskman32.exe - Again, a vital tool from Andrew Collier.  This allows you to dive into a .dsk image, load a file and save it in Windows.  
+
+
+
+SOURCE CODE
+
+Here's a little bit about how I coded the game.  I assume you have a working knowledge of Z80 machine code, and the general architecture of the SAM.  If you haven't, I wouldn't start here: this was quickly (and therefore quite badly) coded, and runs to 3000-4000 lines of code.
+
+I wanted to do this project for a few reasons, but mainly because I wanted a full game easy enough to program that I could actually complete it.  Other reasons?:
+
+* It's a conversion, so I don't have to redesign it
+* XOR has plenty of help on-line
+* Although there is scrolling, it is not arcade-speed
+* There's very little animation
+
+I think I've achieved my goal.  Bonzer!  However the price of finishing the project was that I'm not particularly proud of my coding style in lots of places.  I guess this is what the real world looks like when your projects are more than a few hundred LOC long.
+
+
+
+Firstly, I got lots of great info from http://www.danceswithferrets.org/xor/, including maps of the levels in text format.  These used standard SAM-compatible ASCII text, perfect for me.
+
+Secondly, all the major structural work is done in autoxor.z80 module, supported by playlevel.z80 and shield.z80.  Excepting the map data, the whole game sits in two pages, running in 32768-65535, while using 0-24575 for the screen.  The map data has a short routine to serve a level into the CurrentMap buffer at the beginning of each level.
+
+The game runs in two major 'modes' - User mode and Auto mode.  When in Auto mode, something automated is happening like a fish falling or explosion happening.  When everything has settled, mode passes to User, and the shield can be moved.  Control passes to Auto mode when a shield either pushes an item or leaves a space for an item to move into.  Auto.z80 deals with all of the routines in Auto mode.
+
+Playlevel.z80 deals with general admin and setting up of the level, and shield.z80 deals with User mode.  I'm not proud of this code but it works.
+
+gfx.z80 deals with printing graphics.  There are really only two bits of speed optimisation in the whole game - both graphical: 
+
+1) To speed scrolling up a bit, there are two versions of PrintMap (which does a standard display of the game window, not the whole level map view).  PrintMapFull prints everything in full, and PrintMapFast looks at the previous frame and only prints the differences.  This trick only works because the scrolling is moving a whole 'block' at a time.
+
+2) PrintBlank uses the stack pointer to print a black block very quickly.  The loop could be 'unrolled' for more speed but if I really wanted to speed it up I would use Marc Broster's sprite optimiser for all sprites and tweak the results.  However, to be honest this is a hindrance to the playability.  XOR really punishes you if you try to run round the mazes at top speed, espcially because you only 'see' one block in front of you when you are push-scrolling.  I would rather get the movement a bit more smooth, especially the shield movement when not push-scrolling.
+
+
+
+TEXT MAP CODES
+
+These are the standard ones:
+
+# Wall
+E Exit door
+- Green forcefield (allows horizontal movement)
+| Blue forcefield (allows vertical movement)
+< Chicken
+! Fish
+@ Mask
+1 Magus (Shield 1)
+2 Questor (Shield 2)
++ Beam Me Up Scottie (transporter)
+D Dolly
+S Lightswitch (sad face)
+x Red bomb
+o Blue bomb
+
+I added the following to help with the game mechanic:
+
+7 Dolly travelling left
+8 Dolly travelling right
+9 Dolly travelling up
+0 Dolly travelling down
+X Moving red bomb
+O Moving blue bomb
+B Exploding bomb square
+3 Map part 1
+4 Map part 2
+5 Map part 3
+6 Map part 4
+
+
+
+Okay that's all I can think of for now.  Have fun.
+Howard Price, 1 April 2012
+
+tobermory@cookingcircle.co.uk
+cookingcircle.com

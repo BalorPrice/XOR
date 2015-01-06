@@ -1,0 +1,189 @@
+;---------------------------------------------------------------
+;Key table and joy table bit equates
+EscBit:			equ 7
+F9Bit:         	equ 6
+CursUpBit:    	equ 5
+LeftBit:       	equ 4
+RightBit:      	equ 3
+UpBit:         	equ 2
+DownBit:       	equ 1
+FireBit:       	equ 0
+
+;Control table
+CursDownBit:  	equ 4
+F7Bit:			equ 3
+F8Bit:         	equ 2
+CtrlBit:       	equ 64
+ReturnBit:     	equ 48
+
+;FNum table
+F0:            	equ 0
+F1:            	equ 1
+F2:            	equ 2
+F3:            	equ 3
+F4:            	equ 4
+F5:            	equ 5
+F6:            	equ 6
+FullStop:      	equ 7
+
+; Yes No table
+YesBit:			equ 0
+NoBit:			equ 1
+
+NoKeysPrsd:    	equ 255
+AllKeysPrsd:   	equ 0
+;---------------------------------------------------------------
+KeyOutput:     	db 0			; Main output last polled
+KeyOutputOld:	db 0
+ContOutput:    	db 0			; Last control key scan polled
+
+Key_Table:		db 5,15,65,41,40,8,16,56	;Addresses for (in order) Esc,F9,CursUp,O,P,Q,A,Space
+Joy_Table:		db 5,15,65,36,35,33,34,32
+Control_Table:	db 5,15,65,66,13,14,64,48
+FNum_Table:		db 62,23,22,21,31,30,29,47
+YN_Table:		db 0,0,0,0,0,0,59,44
+;---------------------------------------------------------------
+WaitForSpace:
+				push af
+WaitKeyRescan:
+				call Keys
+				cp NoKeysPrsd
+				JP z,WaitKeyRescan
+				pop af
+				ret  
+;---------------------------------------------------------------
+GetKey:
+				call Keys
+				cp NoKeysPrsd
+				jp z,GetKey
+				ret  
+;---------------------------------------------------------------
+WaitKeyClr:
+				call Keys
+				cp NoKeysPrsd
+				JP nz,WaitKeyClr
+				ret  
+;---------------------------------------------------------------
+WaitKey3:
+				in a,(254)
+				cp 95
+				ret z
+				ld a,1
+				ret  
+;---------------------------------------------------------------
+Keys:
+				push de
+				push hl	
+	
+				ld a,(KeyOutput)
+				ld (KeyOutputOld),a
+				
+				ld hl,Key_Table
+				call KScan
+				push bc
+				ld hl,Joy_Table
+				call KScan
+				ld a,c
+				pop bc
+				or c
+				cpl
+				ld (KeyOutput),a
+				ld c,a
+				
+				pop hl
+				pop de
+				ret  
+
+ControlScan:
+				push de
+				push hl	
+
+				ld hl,Control_Table
+				call KScan
+				ld a,c
+				cpl
+				ld (ContOutput),a
+				ld c,a
+
+				pop hl
+				pop de
+				ret  
+
+KeysYN:
+				push de
+				push hl
+				
+				ld hl,YN_Table
+				call KScan
+				xor a
+				ld (KeyOutput),a
+				ld a,c
+				cpl
+				ld (KeyOutput),a
+				ld c,a
+				
+				pop hl
+				pop de
+				ret
+				
+Scanhl:
+;Scans for table details at hl, leaves result in A
+				push bc
+				push de
+				push hl	
+				
+				call KScan
+				cp c  
+
+				pop hl
+				pop de
+				pop bc
+				ret  
+
+;---------------------------------------------------------------
+KScan:
+				ld   bc,&800
+KScan1:
+                ld   a,(hl)
+                rra  
+                rra  
+                rra  
+                and  15
+                ld   e,a
+                ld   d,0
+                ld   a,(hl)
+                inc  hl
+                push hl
+                ld   hl,Key_address
+                add  hl,de
+                ld   d,a
+                push bc
+                ld   c,254
+                ld   b,(hl)
+                in   a,(c)
+                and  31
+                ld   e,a
+                ld   c,249
+                in   a,(c)
+                and  224
+                or   e
+                cpl  
+                ld   e,a
+                pop  bc
+                pop  hl
+                ld   a,d
+                and  7
+                jr   z,KScan3
+KScan2:
+				rr   e
+				dec  a
+				jr   nz,KScan2
+KScan3:
+				rr   e
+				rl   c
+				djnz KScan1
+				ret  
+Key_address:
+				db &F7,&FB,&FD,&FE,&EF,&DF,&BF,&7F,&FF
+
+;---------------------------------------------------------------

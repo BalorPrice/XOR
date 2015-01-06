@@ -1,0 +1,1255 @@
+; Front end module
+
+BannerPauseValue:	equ 160		; How long to wait between things changing in front end
+
+InitFrontEnd:
+				push af
+				call SetPalette
+				call ResetBanner
+				xor a
+				ld (SelectLevelTimer),a
+				pop af
+				ret
+				
+UpdateFrontEnd:
+				ld a,(SelectLevelTimer)		; If player is selecting a level, pause the rolling demo
+				cp 0
+				jr z,SkipLevelDelay
+				
+				cp 1
+				call z,InitFrontEnd
+				dec a
+				ld (SelectLevelTimer),a
+				ret
+	SkipLevelDelay:
+	
+; Front end works like a trackmo - different routines are called based on the menu (BannerInstructions)
+				ld hl,(CurrentInstruction)
+				ld e,(hl)
+				inc hl
+				ld d,(hl)
+				ex de,hl
+				jp (hl)
+			
+PrintChooseLevel:
+				push af
+				push hl
+				ld a,(SelectLevelTimer)
+				cp 0
+				jr nz,SkipReprintLevelTable
+				ld a,(LevelTableOn)
+				cp Yes
+				jr z,SkipReprintLevelTable
+				call ClearScreen
+				call PrintLevelTable
+	SkipReprintLevelTable:
+				ld a,(LevelBannerOn)
+				cp Yes
+				jr z,SkipReprintLevelBanner
+				ld a,(SelectLevelTimer)
+				cp 0
+				call z,PrintLevelBannerSel
+	SkipReprintLevelBanner:
+				ld a,255
+				ld (SelectLevelTimer),a
+				pop hl
+				pop af
+				ret
+
+PrintLevelSpot:
+				push af
+				push bc
+				push de
+				push hl
+				
+				push af
+				ld a,(CurrentLevel)
+				ld b,a
+				add a
+				add a
+				add b
+				ld d,a
+				ld e,7
+				ld hl,Gfx+(18*128)+120
+				pop af
+				cp 0
+				jr z,PrintLevelSpot2
+				ld hl, Gfx+(6*128)+120
+	PrintLevelSpot2:
+				push bc
+				push de
+				ld b,6
+	PrintLevelSpotLoop:
+				push bc
+				push de
+				push hl
+				ldi
+				ldi
+				ldi
+				pop hl
+				ld bc,128
+				add hl,bc
+				pop de
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				pop bc
+				djnz PrintLevelSpotLoop
+				pop de
+				pop bc
+				
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret	
+				
+CurrentInstruction: dw BannerInstructions
+				
+BannerInstructions:
+BannerInstructionsLoop:
+				dw PrintMainBanner, ScrollAndClear, PrintBlurb, PauseBanner, PauseBanner
+				dw PrintLevelBanner, ScrollAndClear, PrintLevelTableDemo, TurnOnLevelTable, TurnOnLevelBanner
+				dw PauseBanner, TurnOffLevelBanner
+				dw PrintCreditsBanner, ScrollInBanner, PauseBanner, TurnOffLevelTable
+				dw ShowDemo, ResetBanner
+
+ResetBanner:
+				ld hl,BannerInstructions
+				ld (CurrentInstruction),hl
+				call ResetDemoVars
+				ret		
+				
+FetchNewInstruction:
+				ld hl,(CurrentInstruction)
+				inc hl
+				inc hl
+				ld (CurrentInstruction),hl
+				ret
+
+;------------------			
+PrintMainBanner:
+; Main banner is the XOR logo + 3 icons only.
+				ld hl,(192)*128
+				ld de,(192)*128+1
+				ld (hl),0
+				ld bc,40*128
+				ldir
+				
+				ld ix,PrintLogo2
+				call PageGfx
+				
+				ld de,(192+4)*128+50
+				ld a,"1"
+				call PrintGfx
+				ld de,(192+4)*128+62
+				ld a,"!"
+				call PrintGfx
+				ld de,(192+4)*128+74
+				ld a,"<"
+				call PrintGfx
+								
+				call FetchNewInstruction
+				ret
+				
+;------------------
+ScrollAndClear:
+; This scrolls the banner along the bottom, and clears off the screen in a left-wipe at the same time.
+				ld a,(ScrollAndClearCount)
+				cp 0
+				jr z,ResetScrollAndClear
+				
+				dec a
+				ld (ScrollAndClearCount),a
+				
+				cp 32
+				call p,ClearTop
+				call m,ClearBottom
+				
+				jp p,ScrollAndClearTop
+				jp ScrollBannerBottom
+				ret
+				
+	ResetScrollAndClear:
+				ld a,64
+				ld (ScrollAndClearCount),a
+				
+				call FetchNewInstruction
+				ret
+
+	ScrollAndClearTop:
+				jp ScrollBannerTop
+				
+ScrollAndClearCount: db 64
+
+ClearTop:
+				push af
+				
+				res 5,a
+				add a
+				add a
+				ld l,a
+				ld e,l
+				inc e
+				ld h,0
+				ld d,0
+				
+				ld b,80
+	ClearTopLoop:
+				push bc
+				push hl
+				push de
+				ld (hl),0
+				ldi
+				ldi
+				ldi
+				pop de
+				pop hl
+				inc d
+				inc h
+				pop bc
+				djnz ClearTopLoop
+				
+				pop af
+				ret
+
+ClearBottom:
+				push af
+				
+				res 5,a
+				add a
+				add a
+				ld l,a
+				set 7,l
+				ld e,l
+				inc e
+				ld h,0
+				ld d,0
+				
+				ld b,80
+	ClearBottomLoop:
+				push bc
+				push hl
+				push de
+				ld (hl),0
+				ldi
+				ldi
+				ldi
+				pop de
+				pop hl
+				inc d
+				inc h
+				pop bc
+				djnz ClearBottomLoop
+				
+				pop af
+				ret
+				
+;------------------
+PauseBanner:
+; Pause the banner for x frames
+				ld a,(PauseCounter)
+				cp 0
+				dec a
+				jr z,ResetPauseCounter
+				ld (PauseCounter),a
+				ret
+	ResetPauseCounter:
+				ld a,BannerPauseValue
+				ld (PauseCounter),a
+				
+				call FetchNewInstruction
+				ret
+				
+PauseCounter: 	db BannerPauseValue
+				
+;------------------
+PrintCreditsBanner:
+; This banner is the mask, authoring details and Cooking Circle logo
+				ld hl,(192)*128			; Clear buffer
+				ld de,(192)*128+1
+				ld (hl),0
+				ld bc,40*128
+				ldir
+				
+				ld ix,PrintIdent
+				call PageGfx
+				
+				ld de,(192+4)*128+12
+				ld a,"@"
+				call PrintGfx
+				
+				ld de,(192+3)*128+25
+				ld hl,CreditsMess
+				ld a,1
+				call PrintStr
+				
+				call FetchNewInstruction
+				ret
+				
+	CreditsMess: db "~"+1	; ! Can't work out how to get the copyright symbol
+				dm "1987 ASTRAL & LOGOTRON"
+				db CR
+				dm "Sam version by Tobermory 2012"
+				db CR
+				dm "``                cookingcircle.co.uk"
+				db EndMess
+
+PrintLevelTableDemo:
+				call PrintLevelTable
+				call FetchNewInstruction
+				ret
+TurnOnLevelTable:
+				ld a,Yes
+				ld (LevelTableOn),a
+				call FetchNewInstruction
+				ret
+TurnOnLevelBanner:
+				ld a,Yes
+				ld (LevelBannerOn),a
+				call FetchNewInstruction
+				ret
+TurnOffLevelTable:
+				ld a,No
+				ld (LevelTableOn),a
+				call FetchNewInstruction
+				ret
+TurnOffLevelBanner:
+				ld a,No
+				ld (LevelBannerOn),a
+				call FetchNewInstruction
+				ret
+LevelTableOn:	db No
+LevelBannerOn:	db No
+				
+PrintLevelTable:
+				push af
+				push bc
+				push de
+				push hl
+				
+				ld de,11
+				ld hl,LevelNames
+				ld a,2
+				call PrintStr
+				
+				ld de,93
+				ld hl,MovesMess
+				ld a,2
+				call PrintStr
+				
+				call PrintLevelSpot
+				
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret
+				
+;------------------
+PrintBlurb:
+				ld de,(24*128)+16
+				ld hl,BlurbMess
+				ld a,2
+				call PrintStr
+				
+				ld de,(44*128)+16
+				ld hl,BlurbMess2
+				ld a,1
+				call PrintStr
+				
+				call FetchNewInstruction
+				ret
+				
+BlurbMess:
+				dm "XOR MUST BE REVEALED!"
+				db EndMess
+BlurbMess2:
+				dm "His many faces are scattered through 15 levels."
+				db CR,CR
+				dm "Acquiring all the faces on any level will"
+				db CR
+				dm "enhance your knowledge of Xor."
+				db CR, CR
+				dm "Beware, Xor controls his world and doesn't"
+				db CR
+				dm "give up his personality easily."
+				db EndMess
+				
+;------------------				
+ScrollInBanner:
+; The basic banner scroll, with nothing changed in top half of screen
+				ld a,(ScrollInBannerCount)
+				cp 0
+				jr z,ResetScrollInBanner
+				
+				dec a
+				ld (ScrollInBannerCount),a
+				
+				cp 32
+				jp p,ScrollBannerTop
+				jp ScrollBannerBottom
+				ret
+				
+	ResetScrollInBanner:
+				ld a,64
+				ld (ScrollInBannerCount),a
+				
+				call FetchNewInstruction
+				ret
+
+ScrollInBannerCount: db 64
+				
+;------------------				
+PrintLevelBanner:
+; This banner prints a bit of wall and Start Game! instruction
+				
+				ld hl,(192)*128
+				ld de,(192)*128+1
+				ld (hl),0
+				ld bc,40*128
+				ldir
+				
+				ld de,(192+9)*128+37
+				ld hl,PrintLevelBannerMess
+				ld a,2
+				call PrintStr
+			
+				ld de,(192+4)*128
+				ld a,"#"
+				call PrintGfx
+				ld de,(192+4)*128+12
+				ld a,"#"
+				call PrintGfx
+				ld de,(192+5)*128-12
+				ld a,"#"
+				call PrintGfx
+				ld de,(192+5)*128-24
+				ld a,"#"
+				call PrintGfx
+				ld de,(192+5)*128-36
+				ld a,"2"
+				call PrintGfx
+				
+				ld hl,fegfx+93-24
+				ld bc,4*256+15
+				ld de,(192+4)*128+26
+				call PrintDemoBlock
+				
+				ld hl,fegfx+98-24
+				ld bc,4*256+15
+				ld de,(192+9)*128+31
+				call PrintDemoBlock
+				
+				call FetchNewInstruction
+				ret
+				
+	PrintLevelBannerMess: 
+				dm "SELECT LEVEL!"
+				db CR
+				dm "FIRE TO START!"
+				db EndMess
+
+;------------------				
+PrintLevelBannerSel:
+; This version prints when you select a level
+				push af
+				push bc
+				push de
+				push hl
+				
+				ld hl,(192-32)*128
+				ld de,(192-32)*128+1
+				ld (hl),0
+				ld bc,40*128
+				ldir
+				
+				ld de,(192+9-32)*128+37
+				ld hl,PrintLevelBannerMess
+				ld a,2
+				call PrintStr
+			
+				ld de,(192+4-32)*128
+				ld a,"#"
+				call PrintGfx
+				ld de,(192+4-32)*128+12
+				ld a,"#"
+				call PrintGfx
+				ld de,(192+5-32)*128-12
+				ld a,"#"
+				call PrintGfx
+				ld de,(192+5-32)*128-24
+				ld a,"#"
+				call PrintGfx
+				ld de,(192+5-32)*128-36
+				ld a,"2"
+				call PrintGfx
+				
+				ld hl,fegfx+93-24
+				ld bc,4*256+15
+				ld de,(192+4-32)*128+26
+				call PrintDemoBlock
+				
+				ld hl,fegfx+98-24
+				ld bc,4*256+15
+				ld de,(192+9-32)*128+31
+				call PrintDemoBlock
+				
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret
+
+;------------------					
+ScrollAndReveal:
+; This scrolls the banner and 'reveal's the level table in a left wipe from a backup screen
+				ld a,(ScrollAndRevealCount)
+				cp 0
+				jr z,ResetScrollAndReveal
+				
+				dec a
+				ld (ScrollAndRevealCount),a
+				
+				cp 32
+				jp p,ScrollBannerTop
+				jp ScrollBannerBottom
+				ret
+				
+	ResetScrollAndReveal:
+				ld a,64
+				ld (ScrollAndRevealCount),a
+
+				call FetchNewInstruction
+				ret
+ScrollAndRevealCount: db 64
+		
+;------------------	
+ScrollBannerTop:
+				ld hl,(192-32)*128+4
+				ld de,(192-32)*128
+				ld b,32*2
+	ScrollBannerLoop:
+				push bc
+				for 32,ldi
+				pop bc
+				djnz ScrollBannerLoop
+				
+				ld e,124
+				ld d,(192-32)*128/256
+				ld h,(192*128)/256
+				bit 5,a				; This is the scroll count (0-64) handed to us by the counter
+				jr nz,TopSegment
+	BottomSegment:
+				ld d,(192-16)*128/256
+				ld h,(192+16)*128/256
+	Topsegment:
+				res 5,a
+				ld l,a
+				ld a,31
+				sub l
+				add a
+				add a
+				ld l,a
+				
+				ld b,8
+	BannerPrintLoop:
+				push bc
+				push de
+				push hl
+				ldi
+				ldi
+				ldi
+				ldi
+				
+				pop hl
+				inc h
+				pop de
+				inc d
+				
+				pop bc
+				djnz BannerPrintLoop
+				
+				ld bc,128
+				sbc hl,bc
+				ex de,hl
+				sbc hl,bc
+				ex de,hl
+				
+				ld b,8
+	BannerPrintLoop2:
+				push bc
+				push de
+				push hl
+				ldi
+				ldi
+				ldi
+				ldi
+				
+				pop hl
+				dec h
+				pop de
+				dec d
+				
+				pop bc
+				djnz BannerPrintLoop2
+				ret
+				
+ScrollBannerBottom:
+				ld hl,(192-16)*128+4
+				ld de,(192-16)*128
+				ld b,32*2
+				jp ScrollBannerLoop
+		
+LevelNames:
+				dm "` 1 DOTS AND WAVES"
+				db CR
+				dm " 2 SOMETHING FISHY"
+				db CR
+				dm " 3 CHICKEN SUPREME"
+				db CR
+				dm " 4 EXPLOSIVE MIXTURE"
+				db CR
+				dm " 5 HENRYS ANGUISH"
+				db CR
+				dm " 6 THE DOLLS HOUSE"
+				db CR
+				dm " 7 DOLLYS REVENGE"
+				db CR
+				dm " 8 ENLIGHTENMENT"
+				db CR
+				dm " 9 THE CHALLENGE"
+				db CR
+				dm "10 PATIENCE PENDING"
+				db CR
+				dm "`11 RAZOR EDGE"
+				db CR
+				dm "12 THE HAPPY HOUR"
+				db CR
+				dm "13 DEJA VU"
+				db CR
+				dm "14 PENULTIMATE"
+				db CR
+				dm "15 THE DECODER"
+				db EndMess
+				
+MovesMess:
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db CR
+				dm "- 2000"
+				db EndMess
+				
+;------------------	
+ShowDemo:
+
+; Basic Instructions demo:  (supposed to be reminicient of Pacman/defender instructions)
+; 1) Print Instructions title
+; 2) Shield enters from right
+; 3) Staggered print on keyboard instructions, LRUD swap shields, show map, quit 
+; 4) Print mask and exit, shield collects mask, pauses, goes to exit
+
+				ld hl,(ShowDemoCurrInstruction)
+				ld e,(hl)
+				inc hl
+				ld d,(hl)
+				ex de,hl
+				jp (hl)
+			
+ShowDemoCurrInstruction: dw ShowDemoInstructions
+				
+ShowDemoInstructions:
+ShowDemoInstructionsLoop:
+				dw UpWipe
+				dw PrintGalleryHeader
+				dw ResetGallery
+				dw PrintGallery
+				dw PrintGalleryLabels1
+				dw PauseDemo15, PauseDemo15, PauseDemo15, PauseDemo15
+				dw ClearGalleryLabels
+				dw PrintGallery
+				dw PrintGalleryLabels2
+				dw PauseDemo15, PauseDemo15, PauseDemo15, PauseDemo15
+				dw ClearGalleryLabels
+				dw PrintGallery
+				dw MoveShieldLeft1
+				dw PrintInstructions			; INSTRUCTIONS
+				dw PauseDemo15
+				dw PrintInstructions			; UP
+				dw PauseDemo15
+				dw PrintInstructions			; DOWN
+				dw PauseDemo15
+				dw PrintInstructions			; LEFT
+				dw PauseDemo15
+				dw PrintInstructions			; RIGHT
+				dw PauseDemo15
+				dw PrintInstructions			; SWAP
+				dw PauseDemo15
+				dw PrintInstructions			; MAP
+				dw PauseDemo15
+				dw PrintInstructions			; QUIT
+				dw PrintDemoMask				; Print mask and exit
+				dw PauseDemo15, PauseDemo15
+				dw MoveShieldDown1				; Collect mask					
+				dw MoveShieldDown2				; Find exit
+				dw DownWipe
+				dw ResetDemo
+
+ResetDemo:
+				call ResetDemoVars
+				call FetchNewInstruction
+				ret
+
+ResetDemoVars:
+				ld hl,ShowDemoInstructions
+				ld (ShowDemoCurrInstruction),hl
+				ld a,64
+				ld (ScrollAndClearCount),a
+				ld (ScrollInBannerCount),a
+				ld (ScrollAndRevealCount),a
+				ld a,BannerPauseValue
+				ld (PauseCounter),a
+				ld a,50
+				ld (PD15Count),a
+				ld hl,InstructionsList
+				ld (InstructionsPlace),hl
+				xor a
+				ld (GalleryOffset),a
+				ld a,192/8
+				ld (WipeLine),a
+				ld a,No
+				ld (LevelTableOn),a
+				ret
+
+FetchNewDemoInstruction:
+				ld hl,(ShowDemoCurrInstruction)
+				inc hl
+				inc hl
+				ld (ShowDemoCurrInstruction),hl
+				ret
+				
+UpWipe:
+				ld a,(WipeLine)
+				cp 255
+				jr z,ResetUpWipe
+				dec a
+				ld (WipeLine),a
+
+				sla a
+				sla a
+		
+				ld d,a
+				ld h,a
+				ld l,0
+				ld e,1
+				ld (hl),0
+				ld bc,256*4
+				ldir
+				
+				ret
+				
+	ResetUpWipe:
+				ld a,192/8
+				ld (WipeLine),a
+				call FetchNewDemoInstruction
+				ret
+				
+	WipeLine:	db 192/8
+	
+DownWipe:
+				ld a,(DownWipeLine)
+				cp (192/8)-1
+				jr z,ResetDownWipe
+				inc a
+				ld (DownWipeLine),a
+
+				sla a
+				sla a
+		
+				ld d,a
+				ld h,a
+				ld l,0
+				ld e,1
+				ld (hl),0
+				ld bc,256*4
+				ldir
+				
+				ret
+				
+	ResetDownWipe:
+				ld a,0
+				ld (DownWipeLine),a
+				call FetchNewDemoInstruction
+				ret
+				
+	DownWipeLine:	db 0 
+	
+ClearScreenDemo:
+; Special clear screen needed as we don't have enough time
+				ld de,1
+				ld hl,0
+				ld (hl),0
+				ld bc,24576
+				ldir
+				
+				call FetchNewDemoInstruction
+				ret
+
+MoveShieldLeft1:
+				ld a,(MSRX)
+				ld e,a
+				ld d,0
+				call PrintBlankFE
+				
+				dec e
+				dec e
+				dec e
+				dec e
+				ld a,e
+				ld (MSRX),a
+				
+				ld a,108
+				cp e
+				jp m,SkipMSRPrintQuestor
+				
+				push de
+				ld de,128-12
+				ld a,"2"
+				call PrintGfx
+				pop de
+	SkipMSRPrintQuestor:
+				ld a,"1"
+				call PrintGfx
+				
+				ld a,e
+				cp 0
+				ret nz
+				
+				call FetchNewDemoInstruction
+				ld a,128-12
+				ld (MSRX),a
+				ret				
+				
+MSRX:			db 128-12
+
+
+PrintBlankFE:
+				push bc
+				push de
+				push hl
+				
+				ld b,24
+				ld h,d
+				ld l,e
+				inc l
+				ex de,hl
+	PrintBlankFELoop:
+				ld (hl),0
+				push bc
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ld bc,128-12
+				add hl,bc
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				pop bc
+				djnz PrintBlankFELoop
+				
+				pop hl
+				pop de
+				pop bc
+				ret	
+
+
+PrintInstructions:
+				ld hl,(InstructionsPlace)
+								; Get gfx details first
+				ld e,(hl)		; get destination
+				inc hl
+				ld d,(hl)
+				inc hl
+				ld c,(hl)		; get source data
+				inc hl
+				ld b,(hl)
+				
+				push hl
+				inc hl
+				ld a,(hl)			; get width and height
+				inc hl
+				ld h,(hl)
+				ld l,a					
+				
+				push bc
+				push hl
+				pop bc
+				pop hl
+				
+				call PrintDemoBlock
+				pop hl
+				inc hl
+				inc hl
+				
+				inc hl
+				ld e,(hl)
+				inc hl
+				ld d,(hl)
+				inc hl
+				ld a,2
+				call PrintStr
+				call FindNextInstruction
+				ld (InstructionsPlace),hl
+				
+				call FetchNewDemoInstruction
+				ret
+				
+FindNextInstruction:
+				push af
+				ld a,EndMess
+	CheckInstruction:
+				cp (hl)
+				inc hl
+				jr nz,CheckInstruction
+				ld (InstructionsPlace),hl
+				pop af
+				ret
+				
+				
+InstructionsPlace: dw InstructionsList
+InstructionsList:
+				dw 0,0,0,9*128+44		; = Gfx destination, gfx source, gfx width and height, Label destination
+				dm "INSTRUCTIONS"	; = Label
+				db EndMess		; = Label end marker
+				
+				dw 30*128+48,fegfx+93-24
+				db 15,4
+				dw 34*128+58
+				dm "UP"
+				db EndMess
+				
+				dw 51*128+48,fegfx+98-24
+				db 15,4
+				dw 53*128+58
+				dm "DOWN"
+				db EndMess
+				
+				dw 72*128+46,fegfx+103-24
+				db 8,7
+				dw 73*128+58
+				dm "LEFT"
+				db EndMess
+				
+				dw 92*128+48,fegfx+103+(8*128)-24
+				db 8,7
+				dw 93*128+58
+				dm "RIGHT"
+				db EndMess
+				
+				dw 112*128+47,fegfx+110+(8*128)-24
+				db 8,6
+				dw 113*128+58
+				dm "SWAP SHIELDS"
+				db EndMess
+				
+				dw 132*128+48,fegfx+110-24
+				db 8,4
+				dw 133*128+58
+				dm "CURS UP - VIEW MAP"
+				db EndMess
+				
+				dw 151*128+46,fegfx+110+(16*128)-24
+				db 8,9
+				dw 152*128+58
+				dm "QUIT"
+				db EndMess
+				
+				
+PrintDemoBlock:
+				ld ix,PrintDemoBlock2
+				call PageGfx
+				ret
+				
+MoveShieldDown1:
+; Move shield down left hand side of screen to 'collect' mask
+				ld a,(MSDY)
+				ld d,a
+				ld e,0
+				call PrintBlankFE
+				inc d
+				inc d
+				inc d
+				inc d
+				ld a,"1"
+				push de
+				call PrintGfx
+				pop de
+				
+				ld a,d
+				ld (MSDY),a	
+				cp 168/2
+				ret nz
+				
+				call FetchNewDemoInstruction
+				
+				xor a
+				ld (MSDY),a
+				ret
+				
+	MSDY:		db 0
+	
+PrintDemoMask:
+				ld de,(192-24)*128
+				ld a,"@"
+				call PrintGfx
+
+				ld de,(192-24)*128+128-12
+				ld a,"E"
+				call PrintGfx
+				
+				ld hl,TaskMess
+				ld a,2
+				ld de,(192-15)*128+13
+				call PrintStr
+				
+				call FetchNewDemoInstruction
+				ret
+				
+	TaskMess:	dm "COLLECT MASKS!    `EXIT THE MAZE!"
+				db EndMess
+				
+MoveShieldDown2:
+; Move shield down right hand side of screen to 'collect' mask
+				ld a,(MSDY2)
+				ld d,a
+				ld e,128-12
+				call PrintBlankFE
+				inc d
+				inc d
+				inc d
+				inc d
+				ld a,"2"
+				push de
+				call PrintGfx
+				pop de
+				
+				ld a,d
+				ld (MSDY2),a	
+				cp 168/2
+				ret nz
+				
+				call FetchNewDemoInstruction
+				
+				xor a
+				ld (MSDY2),a
+				ret
+				
+	MSDY2:		db 0
+				
+
+PrintGalleryHeader:
+				ld hl,GalleryHeader
+				ld de,9*128+38
+				ld a,2
+				call PrintStr
+				
+				call FetchNewDemoInstruction
+				ret
+				
+	GalleryHeader: dm "THE WORLD OF XOR"
+				db EndMess
+	
+ResetGallery:
+				xor a
+				ld (GalleryOffset),a
+				
+				call FetchNewDemoInstruction
+				ret
+				
+PrintGallery:			
+				ld de,24*2*128+6
+				ld hl,GalleryData
+				ld a,(GalleryOffset)
+				srl a
+				ld c,a
+				jr nc,SkipBetweening
+				ld e,0
+	SkipBetweening:
+				ld b,0
+				add hl,bc
+				
+				ld c,2
+PrintGalleryLoop:
+				push de
+				ld b,10				; Repeat inner loop for 8 columns of blocks
+PrintGalleryLoop2:
+				ld a,(hl)			; Get block type (ascii chr)
+				cp "."
+				jr z,SkipPrintGallery
+				call PrintGfx 	
+	SkipPrintGallery:
+				inc hl				; Move on map a bit
+				ld a,12				; Move destination to next 24 pixels
+				add e
+				ld e,a
+				
+				djnz PrintGalleryLoop2
+			
+				push bc				; Find new row data within map
+				ld bc,40-10
+				add hl,bc
+				pop bc
+				
+				pop de
+				ld a,12*3		; find new destination for gfx
+				add d
+				ld d,a
+						
+				dec c
+				jr nz,PrintGalleryLoop
+				
+				ld a,(GalleryOffset)
+				inc a
+				ld (GalleryOffset),a
+				cp 22
+				call z,FetchNewDemoInstruction
+				cp 42
+				call z,FetchNewDemoInstruction
+				cp 62
+				call z,FetchNewDemoInstruction
+				ret
+
+				
+PrintGalleryLabels1:
+				ld de,76*128
+				ld a,2
+				ld hl,GalleryLabels
+				call PrintStr
+				
+				ld de,84*128
+				ld a,1
+				ld hl,GalleryLabels2
+				call PrintStr
+				
+				ld de,148*128
+				ld a,2
+				ld hl,GalleryLabels3
+				call PrintStr
+				
+				call FetchNewDemoInstruction
+				ret
+				
+PrintGalleryLabels2:
+				ld de,76*128
+				ld a,2
+				ld hl,GalleryLabels4
+				call PrintStr
+				
+				ld de,148*128
+				ld a,2
+				ld hl,GalleryLabels5
+				call PrintStr
+				
+				ld de,156*128+84
+				ld a,1
+				ld hl,GalleryLabels6
+				call PrintStr
+				
+				call FetchNewDemoInstruction
+				ret
+				
+ClearGalleryLabels:
+				ld hl,76*128
+				ld de,76*128+1
+				ld (hl),0
+				ld bc,8*3*128
+				ldir
+				
+				ld hl,148*128
+				ld de,148*128+1
+				ld (hl),0
+				ld bc,8*2*128
+				ldir
+				
+				call FetchNewDemoInstruction
+				ret
+				
+				
+GalleryOffset:	db 0
+
+GalleryData:
+				dm "...........12 .@ .E .xo .3 .D .........."
+				dm "...........-| .< .! ..# .S .+ .........."
+				
+
+GalleryLabels:
+				dm "    OUR HEROES      MASK         EXIT"
+				db EndMess
+GalleryLabels2:
+				dm "        Magus"
+				db CR
+				dm "               Questor"
+				db EndMess
+GalleryLabels3:
+				dm "   FORCEFIELDS    CHICKEN       FISH"
+				db EndMess
+GalleryLabels4:
+				dm "      BOMBS        MAP PIECE     DOLLY"
+				db EndMess
+GalleryLabels5:
+				dm "         WALL        SWITCH   TRANSPORTER"
+				db EndMess
+GalleryLabels6:
+				dm "Beam me up Scotty..."
+				db EndMess
+				
+;----------------------------
+PauseDemo15:
+				ld a,(PD15Count)
+				cp 0
+				jr z,ResetPauseDemo15
+				dec a
+				ld (PD15Count),a
+				ret
+
+PD15Count:		db 50
+	ResetPauseDemo15:
+				ld a,50
+				ld (PD15Count),a
+				
+				call FetchNewDemoInstruction
+				ret

@@ -1,0 +1,849 @@
+; Graphics routines
+;
+; Most of this is standard stuff
+
+;----------------------------------------------------------				
+DrawMapFull:
+				push af
+				push bc
+				push de
+				push hl
+				
+; Find offset in Current Map, previous one and new one.
+				ld a,(CurrentMapOff+1)
+				ld l,a
+				ld h,0
+				add hl,hl
+				add hl,hl
+				add hl,hl
+				add hl,hl
+				add hl,hl
+				ld bc,CurrentMap
+				add hl,bc
+				
+				ld a,(CurrentMapOff)	; Get X offset in A, add to hl
+				ld c,a
+				ld b,0
+				add hl,bc
+				
+; Now print the blocks
+				ld de,0				; Destination for gfx
+				ld c,8				; Repeat for 8 rows of blocks
+DrawMapFullLoop:
+				ld b,8				; Repeat inner loop for 8 columns of blocks
+DrawMapFullLoop2:
+				ld a,(hl)			; Get block type (ascii chr)
+				call PrintGfx 	
+				
+				inc hl				; Move on map a bit
+				ld a,12				; Move destination to next 24 pixels
+				add e
+				ld e,a
+				
+				djnz DrawMapFullLoop2
+			
+				push bc				; Find new row data within map
+				ld bc,24
+				add hl,bc
+				pop bc
+				
+				ld a,12			; find new destination for gfx
+				add d
+				ld d,a
+				ld e,0
+						
+				dec c
+				jr nz,DrawMapFullLoop
+				
+				ld a,8*8
+				ld (LastMapUpdate),a	; Store how many blocks were printed last time
+				
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret					
+				
+;--------------------------------
+DrawMapFast:		
+				push af
+				xor a
+				ld (LastMapUpdate),a
+				push bc
+				push de
+				push hl
+				
+; Find offset in Current Map, previous one and new one.
+				ld a,(PrevMapOff+1)	; Get Y offset in A, multiply by 32 and add to hl
+				ld l,a
+				ld h,0
+				add hl,hl
+				add hl,hl
+				add hl,hl
+				add hl,hl
+				add hl,hl
+				ld bc,CurrentMap
+				add hl,bc
+				
+				ld a,(PrevMapOff)
+				ld c,a
+				ld b,0
+				add hl,bc
+				push hl
+				pop ix
+				
+				ld a,(CurrentMapOff+1)
+				ld l,a
+				ld h,0
+				add hl,hl
+				add hl,hl
+				add hl,hl
+				add hl,hl
+				add hl,hl
+				ld bc,CurrentMap
+				add hl,bc
+				
+				ld a,(CurrentMapOff)	; Get X offset in A, add to hl
+				ld c,a
+				ld b,0
+				add hl,bc
+				
+; Now print the blocks
+				ld c,8				; Repeat for 8 rows of blocks
+				ld de,0				; Destination for gfx
+DrawMapLoop:
+				ld b,8				; Repeat inner loop for 8 columns of blocks
+DrawMapLoop2:
+				ld a,(hl)			; Get block type (ascii chr)
+				cp (ix)				; Test previous offset
+				jr z,SkipDrawMap2
+				call PrintGfx 	; If gfx block has changed, print the new block.
+				call IncBlocksDrawn
+	SkipDrawMap2:
+				
+				inc hl				; Move on map a bit
+				inc ix
+				ld a,12				; Move destination to next 24 pixels
+				add e
+				ld e,a
+				
+				djnz DrawMapLoop2
+			
+				push bc				; Find new row data within map
+				ld bc,24
+				add hl,bc
+				add ix,bc
+				pop bc
+				
+				ld a,12			; find new destination for gfx
+				add d
+				ld d,a
+				ld e,0
+						
+				dec c
+				jr nz,DrawMapLoop
+				
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret
+				
+IncBlocksDrawn:
+				push af
+				ld a,(LastMapUpdate)
+				inc a
+				ld (LastMapUpdate),a
+				pop af
+				ret
+
+LastMapUpdate:	db 0
+
+AddMapLoadDelay:
+; If DrawMapFast is too quick, extra delay is added to the overall speed 
+				ld h,a
+				ld a,(LastMapUpdate)
+				ld l,a
+				ld a,TotalBlockLoad
+				sbc l
+				jr c,BigDelay
+				srl a
+				srl a
+				srl a
+				srl a
+				add h
+				ret	
+	BigDelay:
+	; If there's more than TotalBlockLoad to move, take the speed hit and move on
+				xor a
+				ret
+				
+TotalBlockLoad:	equ 32
+;--------------------------------------
+PrintGfx:
+				push af
+				push bc
+				push de
+				push hl
+; Brute force method but probably better (and quicker) than making a whole decoding table
+			
+				cp " "				; Blank
+				jp z,PrintBlank
+				
+				ld hl,gfx+24		; wall
+				cp "#"
+				jp z,PrintWall
+
+				ld hl,gfx+12		; vertical forcefield
+				cp "|"				
+				jp z,FoundBlock
+				ld hl,gfx+36		; Questor
+				cp "2"
+				jp z,FoundBlock
+				ld hl,gfx+48		; Magus
+				cp "1"
+				jp z,FoundBlock
+				ld hl,gfx+72		; horizontal forcefield
+				cp "-"
+				jp z,FoundBlock
+				ld hl,gfx+3072		; Exit
+				cp "E"
+				jp z,FoundBlock
+				ld hl,gfx+60		; Mask (happy)
+				cp "@"
+				jp z,FoundBlock
+				ld hl,gfx+3072+12	; Fish
+				cp "!"
+				jp z,FoundBlock
+				ld hl,gfx+3072+24	; Chicken
+				cp "<"
+				jp z,FoundBlock
+				ld hl,gfx+3072+36	; Map	Now split up into 4 pieces of map, l-r, t-b
+				cp "M"
+				jp z,FoundBlock
+				cp "3"
+				jp z,FoundBlock
+				cp "4"
+				jp z,FoundBlock
+				cp "5"
+				jp z,FoundBlock
+				cp "6"
+				jp z,FoundBlock
+				
+				ld hl,gfx+3072+48	; Round bomb (o-bomb)
+				cp "o"
+				jp z,FoundBlock
+				cp "O"
+				jp z,FoundBlock
+				ld hl,gfx			; Red cylinder bomb (x-bomb)
+				cp "x"
+				jp z,FoundBlock
+				cp "X"
+				jp z,FoundBlock
+				ld hl,gfx+3072+60	; dolly (7890 are also dollies, but with momentum left/right/up/down)
+				cp "D"
+				jp z,FoundBlock
+				cp "7"
+				jp z,FoundBlock
+				cp "8"
+				jp z,FoundBlock
+				cp "9"
+				jp z,FoundBlock
+				cp "0"
+				jp z,FoundBlock
+				
+				ld hl,(CurrentBombAnimSource)	; explosion animation (updated within Auto)
+				cp "B"
+				jp z,FoundBlock
+				
+				ld hl,gfx+3072+72	; Mask (sad)
+				cp "S"
+				jp z,FoundBlock
+				cp "+"
+				ld hl,gfx+84		; Beam Me Up Scotty
+				
+FoundBlock:							
+				ld a,24
+				ld bc,(256-24)/2
+PrintBlockLoop:
+				push bc
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				pop bc
+				add hl,bc
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				dec a
+				jr nz,PrintBlockLoop
+					
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret
+				
+PrintWall:
+; Walls are like normal blocks, but if lights are off then blanks are printed instead
+				ld c,a
+				ld a,(Lights)
+				cp Yes
+				ld a,c
+				jr z,FoundBlock
+				jr PrintBlank
+				
+PrintBlank:
+				ld (RestoreSP+1),sp
+				
+				ld hl,12
+				add hl,de
+				ld sp,hl
+PrintData:		ld de,0
+				ld b,24
+PrintBlankLoop:
+				push de
+				push de
+				push de
+				push de
+				push de
+				push de
+				
+				ld hl,128+12
+				add hl,sp
+				ld sp,hl
+				djnz PrintBlankLoop 
+				
+RestoreSP:		ld sp,0
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret	
+
+;----------------------------------------------------------	
+PrintGfxAtCoord:
+; These print gfx in a coord.  HL=coords of square, A=Ascii code to print
+				push bc
+				push de
+				push hl
+				
+				ex af,af'
+				
+				xor a
+				ld bc,(CurrentMapOff)
+				sbc hl,bc			; Get screen offsets
+				jr c,SkipPrintCoord	;  		Don't print if offscreen to the left or above
+				
+				ld a,7				;		Don't print if offscreen to the right
+				sbc l
+				jr c,SkipPrintCoord
+				ld a,7				;			or below
+				sbc h
+				jr c,SkipPrintCoord
+				
+				ld b,h				; Multiply both coords by 12 to get screen address to print
+				ld c,l
+				add hl,bc
+				add hl,bc
+				add hl,hl
+				add hl,hl
+				ld d,h
+				ld e,l
+				
+				ex af,af'			; Restore A for the ASCII code of print graphic
+				call PrintGfx
+				
+	SkipPrintCoord:
+				pop hl
+				pop de
+				pop bc
+				ret
+
+PrintGfxAtCoordTween:
+; These print gfx in a coord but as an inbetween animation.
+; HL=coords of square, DE=offset in bytes, A=Ascii code to print
+				push bc
+				push de
+				push hl
+				
+				ex af,af'
+				
+				xor a
+				ld bc,(CurrentMapOff)
+				sbc hl,bc			
+				jr c,SkipPrintCoordTween	
+				
+				ld a,7				
+				sbc l
+				jr c,SkipPrintCoordTween
+				ld a,7				
+				sbc h
+				jr c,SkipPrintCoordTween
+				
+				ld b,h				
+				ld c,l
+				add hl,bc
+				add hl,bc
+				add hl,hl
+				add hl,hl
+				add hl,de
+				ld d,h
+				ld e,l
+				
+				ex af,af'			
+				call PrintGfx
+				
+	SkipPrintCoordTween:
+				pop hl
+				pop de
+				pop bc
+				ret
+				
+PrintGfxFromAddress:
+; Print gfx on the screen (assumes it can be printed).  HL=address in map of square, A=Ascii code to print
+				push hl				
+				call GetCoordsFromAddress
+				call PrintGfxAtCoord
+				pop hl
+				ret
+
+GetCoordsFromAddress:
+; Get Coords from address
+				push af
+				push bc
+				push de
+				ld de,0
+; Get coords from address in HL
+				ld bc,CurrentMap
+				xor a
+				sbc hl,bc
+				ld bc,32
+GetCoordsLoop1:
+				sbc hl,bc
+				inc d
+				jr nc,GetCoordsLoop1
+				
+				dec d
+				add hl,bc
+				ld e,l
+				
+				ex de,hl
+				pop de
+				pop bc
+				pop af
+				ret
+				
+;----------------------------------------------------------		
+	CurrX:		db 0
+	NewX:		db 0
+	font2:		equ gfx+48*128+16
+
+PrintStr:
+	SelectFont:
+				push hl
+				ld hl,AsciiTable2
+				cp 2
+				jr z,SelectFont2
+				ld hl,AsciiTable
+	SelectFont2:
+				ld (FontBase+1),hl
+				pop hl
+	PrintStrLoop2:		
+				ld (NewLine+1),de
+				ld a,e
+				add a
+				ld (CurrX),a
+	PrintStrLoop:
+; Print the string at HL to screen position DE.  Terminate with EndMess, new line with CR
+				ld a,(hl)
+				cp EndMess
+				ret z
+				
+				cp CR
+				jr nz,SkipNewLine
+	NewLine:	ld de,0
+				ld a,5
+				add d
+				ld d,a
+				inc hl
+				jr PrintStrLoop2
+				
+	SkipNewLine:
+				push hl
+				
+				sub 32
+				ld l,a
+				ld h,0
+				add hl,hl
+				add hl,hl
+	FontBase:	ld bc,AsciiTable
+				add hl,bc
+				
+				ld c,(hl)		; Get source addr in bc
+				inc hl
+				ld b,(hl)
+				inc hl
+				ld a,(hl)		; Get width in A
+				
+				push af
+				push hl
+				ld hl,CurrX		; Work out new X for next chr
+				add (hl)
+				pop hl
+				ld (NewX),a
+				
+				ld a,(CurrX)	; Check current X, if odd pixel, use the right-shifted font
+				and 1
+				jr z,SkipOdd
+				ld a,6
+				add b
+				ld b,a
+				
+				ld a,(hl)		; If even pixels wide, then left-shifting by 1 pix makes it 2 pixels wider
+				bit 0,a
+				jr z,SkipOdd
+				pop af
+				inc a
+				push af
+	SkipOdd:
+				pop af
+				srl a
+				jr nz,SkipCarry
+				inc a
+	SkipCarry:
+	
+				ld h,b
+				ld l,c
+				ld b,a
+				ld c,6
+				
+				push de
+PrintLetterLoop2:
+				push bc
+				push de
+				push hl
+				ld c,255
+PrintLetterLoop:
+				ldi
+				djnz PrintLetterLoop
+		
+				pop hl
+				pop de
+				
+				ld bc,128
+				add hl,bc
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				
+				pop bc
+		
+				dec c
+				jr nz,PrintLetterLoop2
+				
+				pop de
+				add e
+				ld e,a
+				pop hl
+				inc hl
+				
+				ld a,(NewX)
+				ld (CurrX),a
+				jp PrintStrLoop
+				
+	CR:			equ 1
+	EndMess:	equ 255
+	
+AsciiTable:
+				dw gfx+3200,3	; space
+				dw font+76,2	; !
+				dw font+125,4	; "
+				dw font+881,6	; £
+				dw font+884,6	; $
+				dw font+871,6	; %
+				dw font+891,5	; &
+				dw font+124,2	; '
+				dw font+115,4	; (
+				dw font+117,4	; )
+				dw font+858,6	; *
+				dw font+121,6	; +
+				dw font+110,3	; ,
+				dw font+119,4	; -
+				dw font+109,2	; .
+				dw font+839,6	; \
+				dw font+106,6	; 0
+				dw font+80,3	; 1
+				dw font+82,6	; 2
+				dw font+85,6	; 3
+				dw font+88,6	; 4
+				dw font+91,6	; 5
+				dw font+94,6	; 6
+				dw font+97,6	; 7
+				dw font+100,6	; 8
+				dw font+103,6	; 9
+				dw font+112,2	; :
+				dw font+113,3	; ;
+				dw font+874,4	; <
+				dw font+853,4	; =
+				dw font+876,4	; >
+				dw font+77,6	; ?
+				dw font+850,6	; @
+				dw font,6		; A
+				dw font+3,6		; B
+				dw font+6,6		; C
+				dw font+9,6		; D
+				dw font+12,6	; E
+				dw font+15,6	; F
+				dw font+18,6	; G
+				dw font+21,6	; H
+				dw font+24,2	; I
+				dw font+25,6	; J
+				dw font+28,6	; K
+				dw font+31,6	; L
+				dw font+34,6	; M
+				dw font+37,6	; N
+				dw font+40,6	; O
+				dw font+43,6	; P
+				dw font+46,6	; Q
+				dw font+49,6	; R
+				dw font+52,6	; S
+				dw font+55,6	; T
+				dw font+58,6	; U
+				dw font+61,6	; V
+				dw font+64,6	; W
+				dw font+67,6	; X
+				dw font+70,6	; Y
+				dw font+73,6	; Z
+				dw font+861,4	; [
+				dw font+842,6	; /
+				dw font+863,4	; ]
+				dw font+869,4	; ^
+				dw font+845,4	; _
+				dw gfx+3200,2		; ' - we use this as a shorter space for lining up text
+				dw font+768,5	; a
+				dw font+771,5	; b
+				dw font+774,4	; c
+				dw font+776,5	; d
+				dw font+779,5	; e
+				dw font+782,3	; f
+				dw font+784,5	; g
+				dw font+787,5	; h
+				dw font+790,3	; i
+				dw font+792,3	; j
+				dw font+794,5	; k
+				dw font+797,3	; l
+				dw font+799,6	; m
+				dw font+802,5	; n
+				dw font+805,5	; o
+				dw font+808,5	; p
+				dw font+811,6	; q
+				dw font+814,4	; r
+				dw font+816,5	; s
+				dw font+819,4	; t
+				dw font+821,5	; u
+				dw font+824,6	; v
+				dw font+827,6	; w
+				dw font+830,5	; x
+				dw font+833,5	; y
+				dw font+836,5	; z
+				dw font+865,4	; {
+				dw font+890,2	; |
+				dw font+867,4	; }
+				dw font+878,5	; ~
+				dw font+847,6	; (c)
+
+AsciiTable2:	; Second font is very limited, just A-Z, 1-0, -, and * 
+				dw Font2+(6*128)+52,5	; space
+				dw Font2+(6*128)+24,5	; !
+				ds 8*4
+				dw Font2+(6*128)+16,7	; *
+				dw Font2+(6*128)+46,7	; +
+				ds 4
+				dw Font2+(6*128)+20,7	; -
+				ds 2*4
+				dw Font2+(6*128)+12,7	; 0
+				dw Font2+104,5 ; 1
+				dw Font2+108,7 ; 2
+				dw Font2+(6*128)+30,7 ; 3
+				dw Font2+(6*128)+34,7 ; 4
+				dw Font2+(6*128)+38,7 ; 5
+				dw Font2+(6*128)+42,7 ; 6
+				dw Font2+(6*128),7	; 7
+				dw Font2+(6*128)+4,7	; 8
+				dw Font2+(6*128)+8,7	; 9
+				ds 5*4
+				dw Font2+(6*128)+27,6	; ?
+				ds 1*4
+				dw Font2,7		; A
+				dw Font2+4,7	; B
+				dw Font2+8,7	; C
+				dw Font2+12,7	; D
+				dw Font2+16,7	; E
+				dw Font2+20,7	; F
+				dw Font2+24,7	; G
+				dw Font2+28,7	; H
+				dw Font2+32,5	; I
+				dw Font2+36,7	; J
+				dw Font2+40,7	; K
+				dw Font2+44,7	; L
+				dw Font2+48,7	; M
+				dw Font2+52,7	; N
+				dw Font2+56,7	; O
+				dw Font2+60,7	; P
+				dw Font2+64,7	; Q
+				dw Font2+68,7	; R
+				dw Font2+72,7	; S
+				dw Font2+76,7	; T
+				dw Font2+80,7	; U
+				dw Font2+84,7	; V
+				dw Font2+88,7	; W
+				dw Font2+92,7	; X
+				dw Font2+96,7	; Y
+				dw Font2+100,7  ; Z
+				dw font+861,4	; [
+				dw font+842,6	; /
+				dw font+863,4	; ]
+				dw font+869,4	; ^
+				dw font+845,4	; _
+				dw gfx+3200,2		; ' - we use this as a shorter space for lining up text
+				
+PageGfx:
+; Generalised paging system for outbound graphics.
+; Graphics routines are paged into Lomem, IX contains address to call
+; When we are there, 
+				ex af,af'
+				in a,(LoPage)
+				ld (PrintStrRestLo+1),a
+				ld a,3+ROMout
+				out (LoPage),a
+				call PageGfx2
+	PrintStrRestLo: ld a,0
+				out (LoPage),a
+				ex af,af'
+				ret
+
+;-----------------------			
+PrintLogoFE:
+				ld ix,PrintLogo2
+				call PageGfx
+				ret
+				
+;-----------------------
+PrintPanelBorders:
+; The control panel borders are taken from a text grid matrix
+				ld de,104
+				ld hl,Dashboard
+	PrintPanelBordersLoop2:
+				ld (RestoreDE+1),de
+				ld b,6
+	PrintPanelBordersLoop1:
+				ld a,(hl)
+				inc hl
+				cp 255
+				ret z
+				cp " "
+				jr z,SkipBorderPrint
+				
+				push hl
+				push bc
+				sub "1"
+				add a
+				ld l,a
+				ld h,0
+				ld bc,BorderLookup
+				add hl,bc
+				ld c,(hl)
+				inc hl
+				ld b,(hl)
+				ld l,c
+				ld h,b
+				call Print8By8
+				pop bc
+				pop hl	
+	SkipBorderPrint:
+				ld a,4
+				add e
+				ld e,a
+				djnz PrintPanelBordersLoop1
+				
+	RestoreDE:	ld de,00
+				inc d
+				inc d
+				inc d
+				inc d
+				jr PrintPanelBordersLoop2
+				
+				
+Print8by8:
+				push bc
+				push de
+				push hl
+				ld b,8
+	Print8by8Loop:
+				push bc
+				push de
+				push hl
+				ldi
+				ldi
+				ldi
+				ldi
+				pop hl
+				ld bc,128
+				add hl,bc
+				pop de
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				pop bc
+				djnz Print8by8Loop
+				pop hl
+				pop de
+				pop bc
+				ret	
+
+	BorderLookup:
+				dw gfx+124	;BorderTL
+				dw gfx+(8*128)+124 ; BorderLeft
+				dw gfx+(32*128)+120 ; BorderTop
+				dw gfx+(24*128)+120 ; BorderBL
+				dw gfx+(16*128)+124 ; BorderTR
+				dw gfx+(24*128)+124 ; BorderBR
+				dw gfx+(32*128)+124 ; BorderRight
+				dw gfx+(40*128)+124 ; BorderBottom
+				
+	Dashboard:	dm "133335"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "488886"
+				dm "133335"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "488886"
+				dm "133335"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "2    7"
+				dm "488886"
+				db 255
+				

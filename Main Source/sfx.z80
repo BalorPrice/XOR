@@ -1,0 +1,452 @@
+; Special effects module
+; I put it all in one place so the game was done before I got sidetracked into demo coding
+
+GeneralWhoosh:
+				push af
+				push bc
+				push de
+				push hl
+				
+				ld de,176*128+30
+				ld a,1
+				call PrintStr
+				
+				ld b,50
+				call WaitBFrames
+				
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret
+
+StartLevelWhoosh:
+				call MainWhoosh
+				ret
+
+CompleteLevelWhoosh:
+				xor a
+				call CircleDownOnShield
+				ld hl,CompleteLevelMess
+				call GeneralWhoosh
+				call PrintCompletedLetter
+				ld b,125
+				call WaitBFrames
+				ret
+				
+	CompleteLevelMess:
+				dm "COMPLETED LEVEL!"
+				db EndMess
+
+WhoopsWhoosh:
+				push af
+				push hl
+				ld a,4
+				call CircleDownOnShield
+				ld hl,WhoopsMess
+				call GeneralWhoosh
+				call ClearScreen
+				pop hl
+				pop af
+				ret
+				
+	WhoopsMess:
+				dm "WHOOPS - SHIELD DIED"
+				db EndMess
+
+GotchaWhoosh:
+				push af
+				push hl
+				ld a,4
+				call CircleDownOnShield
+				ld hl,GotchaMess
+				call GeneralWhoosh
+				pop hl
+				pop af
+				ret
+	GotchaMess:
+				dm "GOTCHA!"
+				db EndMess
+				
+;-----------------------------	
+CircleDownFrontEnd:	
+; Clears the screen in a circle wipe towards the centre
+				ld h,12
+				ld l,16
+				ld c,1
+				call PrintCirclePC		; Run precalculations (gets us 40x speed)
+				
+				ld c,40
+	CircleDownFEloop:
+				ld a,c
+				ld b,0
+				call PrintCircleCalcd
+				dec c
+				jr nz,CircleDownFELoop
+				ret
+
+MainWhoosh:
+; Prints concentric circles and then palette animates them
+				ld hl,&0B10
+				ld c,1	; Game screen only
+				call PrintCirclePC
+				
+				ld e,5
+				ld hl,WhooshColours
+	MainWhooshLoop2:
+				ld c,33
+	MainWhooshLoop:
+				ld b,(hl)
+				ld a,33
+				sub c
+				call PrintCircleCalcd
+				dec c
+				jr nz,MainWhooshLoop
+				inc hl
+				dec e
+				jr nz,MainWhooshLoop2
+				ret
+				
+	WhooshColours:	db &22, &99, &77, &66, &00
+
+;--------------------------------	
+CircleDownOnShield:
+; Do a circle down on the position of the shield
+; A=end radius of the circle
+				
+				; Get X,Y of shield on field
+				push af
+				
+				and a
+				ld bc,(CurrentMapOff)
+				ld hl,(CurrentShieldPos)
+				sbc hl,bc			
+				jr c,SkipCircleDownOnShield	; Don't print if the shield is off the screen (!)
+				
+				ld a,7				
+				sbc l
+				jr c,SkipCircleDownOnShield
+				ld a,7				
+				sbc h
+				jr c,SkipCircleDownOnShield
+				
+				ld b,h				; Multiply both coords by 3n+1 to get 8*8 coord
+				ld c,l
+				add hl,hl
+				add hl,bc
+				inc h
+				inc l
+				
+				ld c,1
+				call PrintCirclePC	; Prepare the circle data
+				
+				ld c,40
+				pop af
+	CircleDownOnShieldLoop:
+				push af
+				call WaitforFrame
+				
+				ld a,c
+				ld b,0
+				call PrintCircleCalcd
+								
+				dec c
+				pop af
+				cp c
+				jr nz,CircleDownOnShieldLoop
+	SkipCircleDownOnShield:
+				ret
+
+;-------------------------							
+PrintCirclePC:
+; Circle effect - this is the precalculations
+
+; C=1 for fullscreen, C=0 for game screen only
+; H=y coord of centre, L=x coord of centre
+
+				push af
+				
+				xor a
+				cp c
+				ld a,31
+				jr nz,Fullscreen
+				ld a,23
+	Fullscreen:
+				ld (PrintCircleXWidth+1),a
+				ld (ReverseX+1),a
+				ld (PrintCalcCircleLoop2+1),a		; This is in the rendering routine
+				pop af
+				
+				ld c,24
+				ld de,CircleData2
+	PrintCircleLoop:
+				push bc
+				
+	PrintCircleXWidth: ld b,32
+	PrintCircleLoop2:
+				push bc
+				push hl
+				
+				push af
+				push de
+				ld a,24
+				sub c		; Get abs(circley-currenty)
+				sbc h
+				jr nc,SkipCompY
+				cpl
+	SkipCompY:
+				ld d,a
+				ld e,0
+				srl d			; Divide d by 8, carry into e, and add on the x-offset
+				rr e
+				srl d
+				rr e
+				srl d
+				rr e
+				
+	ReverseX:	ld a,32
+				sub b		; Now get abs(circlex-currentx)
+				sbc l
+				jr nc,SkipCompX
+				cpl
+	SkipCompX:
+				or e
+				ld e,a
+				
+				ld hl,CircleData
+				add hl,de		; Now we have the correct offset from the table
+				
+				pop de
+				pop af
+				ld a,(hl)			; Store the distance in the calc'd table
+				ld (de),a
+				
+				inc de
+				
+				pop hl
+				pop bc
+				djnz PrintCircleLoop2
+				
+				pop bc
+				dec c
+				jr nz,PrintCircleLoop
+				ret
+				
+PrintCircleCalcd:
+; B=colour (255 for 'display from other screen'), A=radius
+				push af
+				push af
+				ld a,b
+				ld (PrintSquareCol+1),a
+				ld (PrintSquareCol2+1),a
+				pop af
+				
+				push bc
+				push de
+				push hl
+				
+				ld hl,CircleData2
+				ld de,0
+				ld c,24
+	PrintCalcCircleLoop2:
+				ld b,32
+	PrintCalcCircleLoop:
+				cp (hl)
+				call z,PrintSquare
+				
+				inc hl
+				inc e
+				inc e
+				inc e
+				inc e
+				djnz PrintCalcCircleLoop
+				
+				ld e,0
+				inc d
+				inc d
+				inc d
+				inc d
+				
+				dec c
+				jr nz,PrintCalcCircleLoop2
+
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret
+
+PrintSquare:
+; Fast print of an 8*8 block of colour.
+				push bc
+				push de
+				push hl
+				ld (RestPrintSquSP+1),sp
+				
+				ld hl,8
+				add hl,de
+				ld sp,hl
+PrintSquareCol:	ld d,0
+PrintSquareCol2:ld e,0
+				ld b,2
+PrintSquareLoop:
+				push de
+				push de
+				push de
+				push de
+				
+				ld hl,128+8
+				add hl,sp
+				ld sp,hl
+				
+				push de
+				push de
+				push de
+				push de
+				
+				ld hl,128+8
+				add hl,sp
+				ld sp,hl
+				
+				push de
+				push de
+				push de
+				push de
+				
+				ld hl,128+8
+				add hl,sp
+				ld sp,hl
+				
+				push de
+				push de
+				push de
+				push de
+				
+				ld hl,128+8
+				add hl,sp
+				ld sp,hl
+				
+				djnz PrintSquareLoop 
+				
+RestPrintSquSP:	ld sp,0
+				pop hl
+				pop de
+				pop bc
+				ret				
+				
+CircleData:
+				; This data is rounded (x^2+y^2)^1/2.  Done in Excel.  All you need to do is lookup
+				; dy*32+dx to get the distance from the circle's centre.
+				db 01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
+				db 02,03,04,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
+				db 03,04,04,05,06,07,08,09,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
+				db 04,04,05,06,06,07,08,09,10,11,12,13,14,15,16,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32
+				db 05,05,06,06,07,08,09,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,25,26,27,28,29,30,31,32
+				db 06,06,07,07,08,08,09,10,11,12,13,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33
+				db 07,07,08,08,09,09,10,11,11,12,13,14,15,16,17,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33
+				db 08,08,09,09,09,10,11,11,12,13,14,14,15,16,17,18,19,20,21,22,22,23,24,25,26,27,28,29,30,31,32,33
+				db 09,09,09,10,10,11,11,12,13,13,14,15,16,17,17,18,19,20,21,22,23,24,25,26,27,28,28,29,30,31,32,33
+				db 10,10,10,11,11,12,12,13,13,14,15,16,16,17,18,19,20,21,21,22,23,24,25,26,27,28,29,30,31,32,33,34
+				db 11,11,11,12,12,13,13,14,14,15,16,16,17,18,19,19,20,21,22,23,24,25,25,26,27,28,29,30,31,32,33,34
+				db 12,12,12,13,13,13,14,14,15,16,16,17,18,18,19,20,21,22,22,23,24,25,26,27,28,29,30,30,31,32,33,34
+				db 13,13,13,14,14,14,15,15,16,16,17,18,18,19,20,21,21,22,23,24,25,26,26,27,28,29,30,31,32,33,34,35
+				db 14,14,14,15,15,15,16,16,17,17,18,18,19,20,21,21,22,23,24,24,25,26,27,28,29,30,30,31,32,33,34,35
+				db 15,15,15,16,16,16,17,17,17,18,19,19,20,21,21,22,23,23,24,25,26,27,27,28,29,30,31,32,33,34,34,35
+				db 16,16,16,16,17,17,17,18,18,19,19,20,21,21,22,23,23,24,25,26,26,27,28,29,30,31,31,32,33,34,35,36
+				db 17,17,17,17,18,18,18,19,19,20,20,21,21,22,23,23,24,25,25,26,27,28,29,29,30,31,32,33,34,34,35,36
+				db 18,18,18,18,19,19,19,20,20,21,21,22,22,23,23,24,25,25,26,27,28,28,29,30,31,32,32,33,34,35,36,37
+				db 19,19,19,19,20,20,20,21,21,21,22,22,23,24,24,25,25,26,27,28,28,29,30,31,31,32,33,34,35,36,36,37
+				db 20,20,20,20,21,21,21,22,22,22,23,23,24,24,25,26,26,27,28,28,29,30,30,31,32,33,34,34,35,36,37,38
+				db 21,21,21,21,22,22,22,22,23,23,24,24,25,25,26,26,27,28,28,29,30,30,31,32,33,33,34,35,36,37,37,38
+				db 22,22,22,22,23,23,23,23,24,24,25,25,26,26,27,27,28,28,29,30,30,31,32,33,33,34,35,36,36,37,38,39
+				db 23,23,23,23,24,24,24,24,25,25,25,26,26,27,27,28,29,29,30,30,31,32,33,33,34,35,35,36,37,38,39,39
+				db 24,24,24,24,25,25,25,25,26,26,26,27,27,28,28,29,29,30,31,31,32,33,33,34,35,35,36,37,38,38,39,40
+				
+CircleData2:	
+; Each circle is precalculated to save time when displaying
+				ds 32*24
+				
+PrintCompletedLetter:
+; Print the completed letter big - use the arcade font
+				ld a,(CompletionLetter)
+				sub " "
+				add a
+				add a
+				ld c,a
+				ld b,0
+				ld hl,AsciiTable2
+				add hl,bc
+				
+				ld e,(hl)
+				inc hl
+				ld d,(hl)
+				inc hl
+				
+				ld c,5
+				ld b,(hl)
+				srl b
+				
+				ex de,hl
+				ld de,20*128+10
+	PrintCompletedLetterLoop2:
+				push bc
+				push de
+				push hl
+	PrintCompletedLetterLoop:
+				push bc
+				push hl
+				
+				ld a,(hl)
+				push af
+				srl a
+				srl a
+				srl a
+				srl a
+				and %00001111
+				cp 8				
+				call z,PrintLetterWall
+				
+				ex de,hl
+				ld bc,12
+				add hl,bc
+				ex de,hl
+				
+				pop af
+				and %00001111
+				cp 8
+				call z,PrintLetterWall
+				
+				ex de,hl
+				ld bc,12
+				add hl,bc
+				ex de,hl
+				
+				pop hl
+				inc hl
+				pop bc
+				djnz PrintCompletedLetterLoop
+				
+				pop hl
+				ld bc,128
+				add hl,bc
+				pop de
+				ex de,hl
+				ld bc,12*256
+				add hl,bc
+				ex de,hl
+				
+				
+				pop bc
+				
+				dec c
+				jr nz,PrintCompletedLetterLoop2
+				ret
+				
+PrintLetterWall:
+				push af
+				ld a,"#"
+				call PrintGFx
+				pop af
+				ret
+				
+				

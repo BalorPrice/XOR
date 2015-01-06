@@ -1,0 +1,100 @@
+				org MapsEnd
+
+; Outbound graphics handling
+; All these routines expect to be jumped to when in LoMem
+; They page themselves into HiMem and page the screen into LoMem
+
+PageGfx2:
+				ld (PageGfxRestSP+1),sp
+				ld sp,GfxStack+48
+				in a,(HiPage)
+				ld (PageGfx2RestHi+1),a
+				in a,(VidPage)
+				and 31
+				out (HiPage),a
+				ex af,af'
+				
+				ld iy,PageGfx3
+				push iy
+				jp (ix)
+	PageGfx3:
+				ex af,af'
+	PageGfx2RestHi: ld a,0
+				out (HiPage),a
+	PageGfxRestSP: ld sp,0
+				ret
+				
+GfxStack:		ds 50
+
+
+PrintLogo2:
+				ld b,32
+				ld hl,fegfx
+				ld de,32768+(192)*128
+				
+	PrintLogoLoop:
+				push bc
+				
+				ld bc,50
+				ldir
+				
+				ld bc,128-50
+				add hl,bc
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				
+				pop bc
+				djnz PrintLogoLoop
+				ret
+
+PrintIdent:
+				ld b,32
+				ld hl,fegfx+50
+				ld de,32768+(192)*128+94
+				
+	PrintCreditsBannerLoop:
+				push bc
+				
+				ld bc,18
+				ldir
+							
+				ld bc,128-18
+				add hl,bc
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				
+				pop bc
+				djnz PrintCreditsBannerLoop
+				ret	
+
+PrintDemoBlock2:
+				ld a,e	; If DE=0 then don't print anything
+				or d
+				cp 0
+				ret z
+				set 7,d
+				
+	PrintDemoBlockLoop2:
+				push bc
+				push de
+				push hl
+	PrintDemoBlockLoop:
+				ldi
+				inc c
+				djnz PrintDemoBlockLoop
+				
+				pop hl
+				pop de
+				ld bc,128
+				add hl,bc
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				pop bc
+				
+				dec c
+				jr nz,PrintDemoBlockLoop2
+				ret
+			

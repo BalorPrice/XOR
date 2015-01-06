@@ -1,0 +1,1197 @@
+; Moving the shield routines.  I think these can be improved a lot!
+
+
+;----------------------------------------------------------				
+MoveShield:
+				xor a
+				ld (DirtyCellsCount),a
+				
+				bit LeftBit,c		;	Find direction to move
+				push bc				; 	bc is stored for each move, junked in subrouts if movement was successful
+				call z,MoveShieldLeft ; ie when successful, calls are not returned from.
+				pop bc
+				bit RightBit,c
+				push bc
+				call z,MoveShieldRight
+				pop bc
+				bit UpBit,c
+				push bc
+				call z,MoveShieldUp
+				pop bc
+				bit DownBit,c
+				push bc
+				call z,MoveShieldDown
+				pop bc
+				ret
+
+;---------------	
+MoveShieldLeft:
+				ld a,UpdateLeftRight			; Store movement type for UpdateDirty
+				ld (UpdateDirtyType),a
+				ld hl,(CurrentMapAddress)	; Check destination
+				dec hl
+				ld a,(hl)
+				
+				cp " "			; If it's empty or the right forcefield, always move
+				jr z,SkipCheckMasksLeft
+				cp "-"
+				jr z,SkipCheckMasksLeft
+				
+				cp "@"			; You can collect masks
+				call z,DecMaskCount
+				cp "S"			; Sad shields turn the lights off and on
+				call z,SwapLights
+				cp "3"			; Collect map pieces by running over them
+				call z,CollectMapPieceQ1
+				cp "4"
+				call z,CollectMapPieceQ2
+				cp "5"
+				call z,CollectMapPieceQ3
+				cp "6"
+				call z,CollectMapPieceQ4
+				cp "+"
+				jp z,EnterBMUSLeft
+				
+				cp "#"			; Don't move if there's a wall/v.forcefield/shield/chicken/xBomb there
+				ret z
+				cp "|"
+				ret z
+				
+				push hl
+				ld hl,OtherShieldCode
+				cp (hl)
+				pop hl
+				ret z
+
+				cp "<"
+				ret z
+				cp "x"
+				ret z
+				
+				cp "!"			; Fish and oBombs may be pushed if there's space to push it into
+				jr nz,SkipCheckPushFishLeft
+				call CheckPushLeft
+				ret nz
+	SkipCheckPushFishLeft:
+				cp "o"
+				jr nz,SkipCheckPushOBombLeft
+				call CheckPushLeft
+				ret nz
+	SkipCheckPushOBombLeft:
+				cp "D"
+				jr nz,SkipCheckPushDollyLeft
+				call CheckPushDollyLeft
+				ret nz
+	SkipCheckPushDollyLeft:
+				
+				cp "E"			; Don't move to exit if there are masks remaining
+				jr nz,SkipCheckMasksLeft
+				call CountMasksRemaining
+				ret nz
+	SkipCheckMasksLeft:
+				push hl
+				
+				ld hl,CurrentMapOff		; If ScreenOffsetX = ShieldX then scroll screen left too
+				ld a,(CurrentShieldPos)
+				dec a
+				cp (hl)
+				jr nz,SkipScrollScreenLeft
+
+ScrollScreenLeft:
+				pop hl
+				call MoveLeftNoPrint
+				
+				call UpdateMapHistory ; Save map offset
+				ld hl,CurrentMapOff
+				dec (hl)
+				call DrawMapFast
+				
+				pop bc
+				pop bc
+				ret
+				
+SkipScrollScreenLeft:
+				pop hl
+				call MoveLeft
+				
+				pop bc	; Successfully moved, so junk testing for other moves, pop extra bc and return
+				pop bc
+				ret			
+
+MoveLeftNoPrint:
+				inc hl
+				call CheckLeavingSpaceForDirtyCells
+				dec hl
+
+				ld (CurrentMapAddress),hl
+				ld a,(CurrentShieldCode)
+				ld (hl),a
+				inc hl
+				ld (hl)," "
+				
+				call StoreTopRightDirtyCell
+				
+				ld hl,CurrentShieldPos
+				dec (hl)
+		
+				ld a,ScrollDelay
+				call AddMapLoadDelay	; Slow down some more if the map was quick to print
+				ld (KeyDelay),a
+				call StoreMove			; Store move
+				ld a,(hl)				; Get ShieldX
+				call IncMovesTaken
+				ret
+				
+MoveLeft:
+				inc hl
+				call CheckLeavingSpaceForDirtyCells
+				dec hl
+
+				ld (CurrentMapAddress),hl
+				ld a,(CurrentShieldCode)
+				ld (hl),a
+				inc hl
+				ld (hl)," "
+				
+				ld hl,(CurrentShieldPos)
+				ld a," "				; Clear old shield off screen
+				call PrintGfxAtCoord
+				call StoreTopRightDirtyCell
+				
+				ld hl,CurrentShieldPos
+				dec (hl)
+				
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				call StoreMove			; Store move
+				ld a,(hl)				; Get ShieldX
+				call IncMovesTaken
+				
+				ld hl,(CurrentShieldPos) ; Redraw shield - with tween animations
+				ld a,(CurrentShieldCode)
+				ld de,12-TweenOffset
+				call PrintGfxAtCoordTween
+				
+				ld (TweenAnimOffset),de
+				ld hl,-TweenOffset
+				ld (TweenAnimUpdate),hl
+				ld a,Yes
+				ld (TweenAnimMode),a
+				ret
+			
+CheckLeavingSpaceForDirtyCells:
+; Check the space you're leaving, if it has bomb/fish/chicken above or to the right, send to Auto mode to update
+				push hl
+				
+				inc hl
+				ld a,(hl)
+				cp "x"
+				call z,IncDirtyCellsCount
+				cp "<"
+				call z,IncDirtyCellsCount
+				dec hl
+				push bc
+				ld bc,32
+				xor a
+				sbc hl,bc
+				ld a,(hl)
+				cp "o"
+				call z,IncDirtyCellsCount
+				cp "!"
+				call z,IncDirtyCellsCount
+				pop bc
+				pop hl
+				ret			
+
+CheckPushLeft:
+;Called when the destination cell has an object which may be pushed left
+; Return z if pushed
+				ld b,(hl)
+				dec hl
+				ld a," "
+				cp (hl)
+				jr z,PushLeft
+				ld a,"-"
+				cp (hl)
+				jr z,PushLeft
+				inc hl
+				ret
+	PushLeft:
+				ld (hl),b	; If push was successful, load the ASCII map 
+				ld a,b		; Then update the screen (no coordinates need to be changed)
+				call PrintGfxFromAddress
+				call IncDirtyCellsCount
+				inc hl
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				xor a
+				ret
+				
+CheckPushDollyLeft:
+;Called when a dolly is pushed
+; Return z if pushed
+				ld b,(hl)
+				dec hl
+				ld a," "
+				cp (hl)
+				jr z,PushDollyLeft
+				inc hl
+				ret
+	PushDollyLeft:
+				ld a,"7"
+				ld (hl),a				; A left-moving dolly is "7" (right is "8", up is "9", down is "0")
+				call PrintGfxFromAddress
+				call IncDirtyCellsCount
+				inc hl
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				xor a
+				ret
+			
+;---------------	
+MoveShieldRight:
+				ld a,UpdateLeftRight			; Store movement type for UpdateDirty
+				ld (UpdateDirtyType),a
+				ld c,0					; Only accept one keypress at once.  Clear out Keyboard check reg.
+				ld hl,(CurrentMapAddress)	; Check destination
+				inc hl
+				ld a,(hl)
+				
+				cp " "			; If it's empty or the right forcefield, always move
+				jr z,SkipCheckMasksRight
+				cp "-"
+				jr z,SkipCheckMasksRight
+				
+				cp "@"			; You can collect masks
+				call z,DecMaskCount
+				cp "S"			; Sad shields turn the lights off and on
+				call z,SwapLights
+				cp "3"			; Collect map pieces by running over them
+				call z,CollectMapPieceQ1
+				cp "4"
+				call z,CollectMapPieceQ2
+				cp "5"
+				call z,CollectMapPieceQ3
+				cp "6"
+				call z,CollectMapPieceQ4
+				cp "+"
+				jp z,EnterBMUSRight
+				
+				cp "#"			; Don't move if there's a wall/v.forcefield/shield/chicken/xBomb there
+				ret z
+				cp "|"
+				ret z
+				
+				push hl
+				ld hl,OtherShieldCode
+				cp (hl)
+				pop hl
+				ret z
+				
+				cp "<"
+				ret z
+				cp "x"
+				ret z
+				
+				cp "!"			; Fish and oBombs may be pushed if there's space to push it into
+				jr nz,SkipCheckPushFishRight
+				call CheckPushRight
+				ret nz
+	SkipCheckPushFishRight:
+				cp "o"
+				jr nz,SkipCheckPushOBombRight
+				call CheckPushRight
+				ret nz
+	SkipCheckPushOBombRight:
+				cp "D"
+				jr nz,SkipCheckPushDollyRight
+				call CheckPushDollyRight
+				ret nz
+	SkipCheckPushDollyRight:
+				
+				cp "E"			; Don't move to exit if there are masks remaining
+				jr nz,SkipCheckMasksRight
+				call CountMasksRemaining
+				ret nz
+	SkipCheckMasksRight:
+				push hl
+				
+				ld a,(CurrentShieldPos)
+				ld hl,CurrentMapOff		; If ScreenOffsetX = ShieldX - 7 then scroll screen right too
+				sub 6
+				cp (hl)
+				jr nz,SkipScrollScreenRight
+								
+ScrollScreenRight:
+				pop hl
+				call MoveRightNoPrint
+				
+				call UpdateMapHistory ; Save map offset
+				ld hl,CurrentMapOff
+				inc (hl)
+				call DrawMapFast
+				
+				pop bc
+				pop bc
+				ret
+				
+SkipScrollScreenRight:
+				pop hl
+				call MoveRight
+				
+				pop bc
+				pop bc
+ 				ret			
+				
+MoveRightNoPrint:
+				dec hl
+				call CheckLeavingSpaceForDirtyCells
+				inc hl
+				
+				ld (CurrentMapAddress),hl
+				ld a,(CurrentShieldCode)
+				ld (hl),a
+				dec hl
+				ld (hl)," "
+				
+				call StoreTopRightDirtyCell
+				
+				ld hl,CurrentShieldPos
+				inc (hl)
+				
+				ld a,ScrollDelay
+				call AddMapLoadDelay
+				ld (KeyDelay),a
+				call StoreMove
+				ld a,(hl)				; Get ShieldX
+				call IncMovesTaken
+				ret
+
+MoveRight:
+				dec hl
+				call CheckLeavingSpaceForDirtyCells
+				inc hl
+				
+				ld (CurrentMapAddress),hl
+				ld a,(CurrentShieldCode)
+				ld (hl),a
+				dec hl
+				ld (hl)," "
+				
+				ld hl,(CurrentShieldPos)
+				ld a," "
+				call PrintGfxAtCoord
+				call StoreTopRightDirtyCell
+				
+				ld hl,CurrentShieldPos
+				inc (hl)
+				
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				call StoreMove
+				ld a,(hl)				; Get ShieldX
+				call IncMovesTaken
+				
+				ld hl,(CurrentShieldPos) ; Redraw shield
+				ld a,(CurrentShieldCode)
+				
+				ld de,TweenOffset-12
+				call PrintGfxAtCoordTween
+				
+				ld (TweenAnimOffset),de
+				ld hl,TweenOffset
+				ld (TweenAnimUpdate),hl
+				ld a,Yes
+				ld (TweenAnimMode),a
+				ret
+				
+CheckPushRight:
+				ld b,(hl)
+				inc hl
+				ld a," "
+				cp (hl)
+				jr z,PushRight
+				ld a,"-"
+				cp (hl)
+				jr z,PushRight
+				dec hl
+				ret
+	PushRight:
+				ld (hl),b
+				ld a,b
+				call PrintGfxFromAddress
+				call IncDirtyCellsCount
+				dec hl
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				xor a
+				ret
+
+CheckPushDollyRight:
+				ld b,(hl)
+				inc hl
+				ld a," "
+				cp (hl)
+				jr z,PushDollyRight
+				dec hl
+				ret
+	PushDollyRight:
+				ld a,"8"
+				ld (hl),a
+				call PrintGfxFromAddress
+				call IncDirtyCellsCount
+				dec hl
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				xor a
+				ret
+;---------------	
+MoveShieldUp:
+				ld a,UpdateUpDown			; Store movement type for UpdateDirty
+				ld (UpdateDirtyType),a
+				ld c,0					; Only accept one keypress at once.  Clear out Keyboard check reg.
+				ld hl,(CurrentMapAddress)	; Check destination
+				ld de,32
+				xor a
+				sbc hl,de
+				ld a,(hl)
+				
+				cp " "			; If it's empty or the right forcefield, always move
+				jr z,SkipCheckMasksUp
+				cp "|"
+				jr z,SkipCheckMasksUp
+				
+				cp "@"			; You can collect masks
+				call z,DecMaskCount
+				cp "S"			; Sad shields turn the lights off and on
+				call z,SwapLights
+				cp "3"			; Collect map pieces by running over them
+				call z,CollectMapPieceQ1
+				cp "4"
+				call z,CollectMapPieceQ2
+				cp "5"
+				call z,CollectMapPieceQ3
+				cp "6"
+				call z,CollectMapPieceQ4
+				cp "+"
+				jp z,EnterBMUSUp
+				
+				cp "#"			; Don't move if there's a wall/v.forcefield/shield/chicken/xBomb there
+				ret z
+				cp "-"
+				ret z
+
+				push hl
+				ld hl,OtherShieldCode
+				cp (hl)
+				pop hl
+				ret z
+				
+				cp "!"
+				ret z
+				cp "o"
+				ret z
+				
+				cp "<"			; Chickens and xBombs may be pushed if there's space to push it into
+				jr nz,SkipCheckPushChickenUp
+				call CheckPushUp
+				ret nz
+	SkipCheckPushChickenUp:
+				cp "x"
+				jr nz,SkipCheckPushXBombUp
+				call CheckPushUp
+				ret nz
+	SkipCheckPushXBombUp:
+				cp "D"
+				jr nz,SkipCheckPushDollyUp
+				call CheckPushDollyUp
+				ret nz
+	SkipCheckPushDollyUp:
+				
+				cp "E"			; Don't move to exit if there are masks remaining
+				jr nz,SkipCheckMasksUp
+				call CountMasksRemaining
+				ret nz
+	SkipCheckMasksUp:
+				push hl
+				
+				ld hl,CurrentMapOff+1		; If ScreenOffsetY = ShieldY then scroll screen up too
+				ld a,(CurrentShieldPos+1)
+				dec a
+				cp (hl)
+				jr nz,SkipScrollScreenUp			
+ScrollScreenUp:
+				pop hl
+				call MoveUpNoPrint
+				
+				call UpdateMapHistory ; Save map offset
+				ld hl,CurrentMapOff+1
+				dec (hl)
+				call DrawMapFast
+
+				
+				pop bc
+				pop bc
+				ret
+				
+SkipScrollScreenUp:
+				pop hl
+				call MoveUp
+				
+				pop bc
+				pop bc
+				ret			
+
+MoveUpNoPrint:
+				add hl,de
+				call CheckLeavingSpaceForDirtyCells
+				xor a
+				sbc hl,de
+				
+				ld (CurrentMapAddress),hl	; The destination is good, store as the new current Map Address
+				ld a,(CurrentShieldCode)		; Get ASCII value for ThisShield ("1" or "2")
+				ld (hl),a					; Put in the ASCII map as the current place for ThisShield
+				add hl,de					; Replace old shield position with a blank
+				ld (hl)," "
+
+				call StoreTopRightDirtyCell
+				
+				ld hl,CurrentShieldPos+1	; Update ShieldY Coord
+				dec (hl)
+								
+				ld a,ScrollDelay
+				call AddMapLoadDelay
+				ld (KeyDelay),a
+				call StoreMove
+				ld a,(hl)				; Get ShieldX
+				call IncMovesTaken
+				ret
+				
+MoveUp:
+				add hl,de
+				call CheckLeavingSpaceForDirtyCells
+				xor a
+				sbc hl,de
+				
+				ld (CurrentMapAddress),hl	; The destination is good, store as the new current Map Address
+				ld a,(CurrentShieldCode)		; Get ASCII value for ThisShield ("1" or "2")
+				ld (hl),a					; Put in the ASCII map as the current place for ThisShield
+				add hl,de					; Replace old shield position with a blank
+				ld (hl)," "
+				
+				ld hl,(CurrentShieldPos)
+				ld a," "
+				call PrintGfxAtCoord
+				call StoreTopRightDirtyCell
+				
+				ld hl,CurrentShieldPos+1	; Update ShieldY Coord
+				dec (hl)
+				
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				call StoreMove
+				ld a,(hl)				; Get ShieldX
+				call IncMovesTaken
+				
+				ld hl,(CurrentShieldPos) ; Redraw shield
+				ld a,(CurrentShieldCode)
+				
+				ld de,(12-TweenOffset)*256
+				call PrintGfxAtCoordTween
+				
+				ld (TweenAnimOffset),de
+				ld hl,-(TweenOffset*256)
+				ld (TweenAnimUpdate),hl
+				ld a,Yes
+				ld (TweenAnimMode),a
+				ret
+				
+CheckPushUp:
+;Called when the destination cell has an object which may be pushed 
+; Return z if pushed
+				ld b,(hl)
+				xor a
+				sbc hl,de
+				ld a," "
+				cp (hl)
+				jr z,PushUp
+				ld a,"|"
+				cp (hl)
+				jr z,PushUp
+				add hl,de
+				ret
+	PushUp:
+				ld (hl),b
+				ld a,b
+				call PrintGfxFromAddress
+				call IncDirtyCellsCount
+				add hl,de
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				xor a
+				ret
+
+CheckPushDollyUp:
+				ld b,(hl)
+				xor a
+				sbc hl,de
+				ld a," "
+				cp (hl)
+				jr z,PushDollyUp
+				add hl,de
+				ret
+	PushDollyUp:
+				ld a,"9"
+				ld (hl),a
+				call PrintGfxfromAddress
+				call IncDirtyCellsCount
+				add hl,de
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				xor a
+				ret
+
+;---------------	
+MoveShieldDown:
+				ld a,UpdateUpDown			; Store movement type for UpdateDirty
+				ld (UpdateDirtyType),a
+				ld c,0					; Only accept one keypress at once.  Clear out Keyboard check reg.
+				ld hl,(CurrentMapAddress)	; Check destination
+				ld de,32
+				add hl,de
+				ld a,(hl)
+				
+				cp " "			; If it's empty or the right forcefield, always move
+				jr z,SkipCheckMasksDown
+				cp "|"
+				jr z,SkipCheckMasksDown
+				
+				cp "@"			; You can collect masks
+				call z,DecMaskCount
+				cp "S"			; Sad shields turn the lights off and on
+				call z,SwapLights
+				cp "3"			; Collect map pieces by running over them
+				call z,CollectMapPieceQ1
+				cp "4"
+				call z,CollectMapPieceQ2
+				cp "5"
+				call z,CollectMapPieceQ3
+				cp "6"
+				call z,CollectMapPieceQ4
+				cp "+"
+				jp z,EnterBMUSDown
+				
+				cp "#"			; Don't move if there's a wall/v.forcefield/shield/chicken/xBomb there
+				ret z
+				cp "-"
+				ret z
+
+				push hl
+				ld hl,OtherShieldCode
+				cp (hl)
+				pop hl
+				ret z
+				
+				cp "!"
+				ret z
+				cp "o"
+				ret z
+				
+				cp "<"			; Chickens and xBombs may be pushed if there's space to push it into
+				jr nz,SkipCheckPushChickenDown
+				call CheckPushDown
+				ret nz
+	SkipCheckPushChickenDown:
+				cp "x"
+				jr nz,SkipCheckPushXBombDown
+				call CheckPushDown
+				ret nz
+	SkipCheckPushXBombDown:
+				cp "D"
+				jr nz,SkipCheckPushDollyDown
+				call CheckPushDollyDown
+				ret nz
+	SkipCheckPushDollyDown:	
+
+				cp "E"			; Don't move to exit if there are masks remaining
+				jr nz,SkipCheckMasksDown
+				call CountMasksRemaining
+				ret nz
+	SkipCheckMasksDown:
+				
+				push hl
+				
+				ld hl,CurrentMapOff+1		; If ScreenOffsetY = ShieldY then scroll screen up too
+				ld a,(CurrentShieldPos+1)
+				sub 6
+				cp (hl)
+				jr nz,SkipScrollScreenDown
+ScrollScreenDown:
+				pop hl
+				call MoveDownNoPrint
+				
+				call UpdateMapHistory ; Save map offset
+				ld hl,CurrentMapOff+1
+				inc (hl)
+				call DrawMapFast
+				
+				pop bc
+				pop bc
+				ret
+				
+SkipScrollScreenDown:
+				pop hl
+				call MoveDown
+				call WaitforFrame
+				
+				pop bc
+				pop bc
+				ret			
+
+MoveDownNoPrint:
+				xor a
+				sbc hl,de
+				call CheckLeavingSpaceForDirtyCells
+				add hl,de
+				
+				ld (CurrentMapAddress),hl	; The destination is good, store as the new current Map Address
+				ld a,(CurrentShieldCode)		; Get ASCII value for ThisShield ("1" or "2")
+				ld (hl),a					; Put in the ASCII map as the current place for ThisShield
+				xor a						; Replace old shield position with a blank
+				sbc hl,de
+				ld (hl)," "
+				
+				call StoreTopRightDirtyCell
+				
+				ld hl,CurrentShieldPos+1	; Update ShieldY Coord
+				inc (hl)
+				
+				ld a,ScrollDelay
+				call AddMapLoadDelay
+				ld (KeyDelay),a
+				call StoreMove
+				ld a,(hl)				; Get ShieldX
+				call IncMovesTaken
+				ret
+				
+MoveDown:
+				xor a
+				sbc hl,de
+				call CheckLeavingSpaceForDirtyCells
+				add hl,de
+				
+				ld (CurrentMapAddress),hl	; The destination is good, store as the new current Map Address
+				ld a,(CurrentShieldCode)		; Get ASCII value for ThisShield ("1" or "2")
+				ld (hl),a					; Put in the ASCII map as the current place for ThisShield
+				xor a						; Replace old shield position with a blank
+				sbc hl,de
+				ld (hl)," "
+				
+				ld hl,(CurrentShieldPos)
+				ld a," "
+				call PrintGfxAtCoord
+				call StoreTopRightDirtyCell
+				
+				ld hl,CurrentShieldPos+1	; Update ShieldY Coord
+				inc (hl)
+				
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				call StoreMove
+				ld a,(hl)				; Get ShieldX
+				call IncMovesTaken
+				
+				ld hl,(CurrentShieldPos) ; Redraw shield
+				ld a,(CurrentShieldCode)
+				
+				ld de,-((12-TweenOffset)*256)
+				call PrintGfxAtCoordTween
+				
+				ld (TweenAnimOffset),de
+				ld hl,TweenOffset*256
+				ld (TweenAnimUpdate),hl
+				ld a,Yes
+				ld (TweenAnimMode),a
+				ret
+				
+CheckPushDown:
+				ld b,(hl)
+				add hl,de
+				ld a," "
+				cp (hl)
+				jr z,PushDown
+				ld a,"|"
+				cp (hl)
+				jr z,PushDown
+				xor a
+				sbc hl,de
+				ret
+	PushDown:
+				ld (hl),b
+				ld a,b
+				call PrintGfxFromAddress
+				call IncDirtyCellsCount
+				xor a
+				sbc hl,de
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				xor a
+				ret
+
+CheckPushDollyDown:
+				ld b,(hl)
+				add hl,de
+				ld a," "
+				cp (hl)
+				jr z,PushDollyDown		; NB Dollies can't travel through forcefields
+				xor a
+				sbc hl,de
+				ret
+	PushDollyDown:
+				ld a,"0"
+				ld (hl),a
+				call PrintGfxFromAddress
+				call IncDirtyCellsCount
+				xor a
+				sbc hl,de
+				ld a,MoveDelay
+				ld (KeyDelay),a
+				xor a
+				ret
+				
+				
+;---------------
+; Transporters code
+EnterBMUSLeft:
+; You've entered from the left. It is always possible to travel through a BMUS, so clear out old shield position
+				call UpdateMapHistory
+				ld hl,(CurrentMapAddress)
+				ld a," "
+				ld (hl),a
+				call PrintGfxFromAddress
+				dec hl
+				jr EnterBMUS
+				
+EnterBMUSRight:
+				call UpdateMapHistory
+				ld hl,(CurrentMapAddress)
+				ld a," "
+				ld (hl),a
+				call PrintGfxFromAddress
+				inc hl
+				jr EnterBMUS
+
+EnterBMUSUp:
+				call UpdateMapHistory
+				ld hl,(CurrentMapAddress)
+				ld a," "
+				ld (hl),a
+				call PrintGfxFromAddress
+				ld de,32
+				xor a
+				sbc hl,de
+				jr EnterBMUS
+
+EnterBMUSDown:
+				call UpdateMapHistory
+				ld hl,(CurrentMapAddress)
+				ld a," "
+				ld (hl),a
+				call PrintGfxFromAddress
+				ld de,32
+				add hl,de
+				jr EnterBMUS				
+
+EnterBMUS:	
+;  There can only be two BMUSs on each level, one moves to the other
+; Find other BMUS as starting point - store this for later printing
+				call GetNewMapPos			; return HL=new map position
+				call GetNewMapCoords		; BC=map coords of BMUS
+				
+; Test emerging on right
+TestBMUSRight:
+				inc hl
+				ld a," "
+				cp (hl)
+				jr nz,TestBMUSUp
+				inc c	; If successful, update coords.  Map offset stays the same whichever side we emerge on.
+				jr BMUSMove
+; If failed, test emerging above
+TestBMUSUp:
+				ld de,33
+				xor a
+				sbc hl,de
+				ld a," "
+				cp (hl)
+				jr nz,TestBMUSLeft
+				dec b
+				jr BMUSMove
+; If failed, test emerging to the left (guessed *** TESTME)
+TestBMUSLeft:
+				ld de,31
+				add hl,de
+				cp (hl)
+				jp nz,TestBMUSDown
+				dec c
+				jr BMUSMove
+; If failed, test emerge below - if no available exits, go back through the BMUS to start
+TestBMUSDown:
+				ld de,33
+				add hl,de
+				cp (hl)
+				jp nz,FailBMUS
+				inc b
+BMUSMove:
+				ld a,(CurrentShieldCode)
+				ld (hl),a
+				ld (CurrentShieldPos),bc
+				ld (CurrentMapAddress),hl
+				call GetNewMapOffsets		; DE=new map offsets
+				
+BMUSWhoosh:
+; Do a BMUS whoosh
+BMUSReprintScreen:
+; Reprint screen 
+				call DrawMapFull
+				call ResetTopRightDirtyCell
+				ret
+				
+FailBMUS:
+; If no space to come out of the other BMUS, return back through
+				ld de,32
+				xor a
+				sbc hl,de
+				jr EnterBMUS
+				
+				
+GetNewMapPos:	; Return map address of new BMUS in HL
+				ld a,0		; Keep track of which BMUS we are jumping to
+				ld (DestBMUS),a
+				
+				; Search map for the other "+" sign
+				ld de,CurrentMap
+GetNewMapPosLoop:
+				ld a,(de)
+				cp "+"
+				jr nz,SkipFoundOtherBMUS
+				
+				; Found one.  Check it's not the one we entered
+				sbc hl,de
+				add hl,de ; NB add nn,mm doesn't affect the Z flag, so this is an easy way to do cp hl,de
+				jr z,SkipFoundOtherBMUS2
+				
+				ld h,d
+				ld l,e
+				ret
+				
+SkipFoundOtherBMUS2:
+				ld a,1
+				ld (DestBMUS),a
+SkipFoundOtherBMUS:
+				inc de
+				jr GetNewMapPosLoop
+				
+				
+				
+				
+GetNewMapCoords: ; Return map coords of new BMUS in BC
+				push hl
+				call GetCoordsFromAddress
+				ld c,l
+				ld b,h
+				pop hl
+				ret
+				
+GetNewMapOffsets: ; Return map offsets for BMUS in DE
+				push bc
+				push de
+				push hl
+				ld a,(DestBMUS)
+				add a
+				ld c,a
+				ld b,0
+				ld hl,BMUSMapOff
+				add hl,bc
+				ld d,(hl)
+				inc hl
+				ld e,(hl)
+				ld (CurrentMapOff),de
+				pop hl
+				pop de
+				pop bc
+				ret
+				
+DestBMUS:		db 0
+;---------------
+; Sometimes you just can't be bothered to make a data structure for things!				
+CollectMapPieceQ1:
+				ld a,(MapCollected)
+				set 0,a
+				ld (MapCollected),a
+				call PrintMapPiece1
+				xor a
+				ret
+				
+CollectMapPieceQ2:
+				ld a,(MapCollected)
+				set 1,a
+				ld (MapCollected),a
+				call PrintMapPiece2
+				xor a
+				ret
+				
+CollectMapPieceQ3:
+				ld a,(MapCollected)
+				set 2,a
+				ld (MapCollected),a
+				call PrintMapPiece3
+				xor a
+				ret
+				
+CollectMapPieceQ4:
+				ld a,(MapCollected)
+				set 3,a
+				ld (MapCollected),a
+				call PrintMapPiece4
+				xor a
+				ret
+
+PrintMapPieces:
+				ld a,(MapCollected)		; Only print map quarters that have been collected.
+				bit 0,a
+				call nz,PrintMapPiece1
+				bit 1,a
+				call nz,PrintMapPiece2
+				bit 2,a
+				call nz,PrintMapPiece3
+				bit 3,a
+				call nz,PrintMapPiece4
+				ret
+
+PrintMapPiece1:
+				push bc
+				push de
+				push hl
+				ld hl,gfx+(48*128)
+				ld de,(33*128)-20
+				call Print16by16
+				pop hl
+				pop de
+				pop bc
+				ret
+				
+PrintMapPiece2:
+				push bc
+				push de
+				push hl
+				ld hl,gfx+(48*128)+8
+				ld de,(33*128)-12
+				call Print16by16
+				pop hl
+				pop de
+				pop bc
+				ret
+
+PrintMapPiece3:
+				push bc
+				push de
+				push hl
+				ld hl,gfx+(64*128)
+				ld de,(49*128)-20
+				call Print16by16
+				pop hl
+				pop de
+				pop bc
+				ret
+				
+PrintMapPiece4:
+				push bc
+				push de
+				push hl
+				ld hl,gfx+(64*128)+8
+				ld de,(49*128)-12
+				call Print16by16
+				pop hl
+				pop de
+				pop bc
+				ret
+				
+Print16by16:
+				ld b,16
+	Print16by16Loop:
+				push bc
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ld bc,128-8
+				add hl,bc
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				pop bc
+				djnz Print16by16Loop
+				ret
+
+PrintMapQuarters:
+				ld a,(MapCollected)		; Only print map quarters that have been collected.
+				bit 0,a
+				jr z,SkipPrintQ1
+				ld hl,CurrentMap
+				ld de,0
+				call PrintMapQuarter
+	SkipPrintQ1:
+				bit 1,a
+				jr z,SkipPrintQ2
+				ld hl,CurrentMap+16
+				ld de,3*16
+				call PrintMapQuarter
+	SkipPrintQ2:
+				bit 2,a
+				jr z,SkipPrintQ3
+				ld hl,CurrentMap+(16*32)
+				ld de,6*16*128
+				call PrintMapQuarter
+	SkipPrintQ3:
+				bit 3,a
+				ret z
+				ld hl,CurrentMap+(16*32)+16
+				ld de,12336						; (6*16*128)+(3*16)
+				call PrintMapQuarter
+				ret
+;----------------------------				
+TweenAnim:
+; Smooth the animation of shield when moving without scrolling
+				ld hl,(CurrentShieldPos)	; Clear off the old position with a space
+				ld de,(TweenAnimOffset)
+				ld a," "
+				call PrintGfxAtCoordTween
+				
+				ld hl,(TweenAnimUpdate)		; Find new offset for tween anim
+				add hl,de			
+				ex de,hl
+				ld (TweenAnimOffset),de
+				
+				ld hl,(CurrentShieldPos)	; Finally, print current shield in new position
+				ld a,(CurrentShieldCode)
+				call PrintGfxAtCoordTween
+				
+				xor a						; Test whether we are now on a coord boundary
+				or d
+				or e
+				cp 0
+				ret nz
+				ld a,No						; If so, turn off tweening
+				ld (TweenAnimMode),a
+				ret
+
+TweenAnimOffset: dw 0
+TweenAnimUpdate: dw 0
+TweenAnimMode:	db No
+				
+
+				

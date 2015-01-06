@@ -1,0 +1,295 @@
+; ++++++++++++++++++++++++++++++++++++++++++++
+;  XOR! By tobermory@cookingcircle.co.uk 2012
+; ++++++++++++++++++++++++++++++++++++++++++++
+
+				dump 1,0
+				org 32768
+Paging:
+				di   
+				ld   (RestoreStack+1),sp
+				in   a,(LoPage)
+				ld   (RestoreLoMem+1),a
+				in   a,(VidPage)
+				ld   (RestoreVidMem+1),a
+				and  31
+				or   Mode4
+				out  (VidPage),a
+				ld   (Screen1),a
+				and  %00011111
+				or   ROMout
+				out  (LoPage),a
+				ld   sp,DiaStack+118
+
+				call MainProg		; This is the only routine called
+
+RestoreVidMem: 	ld   a,0
+				out  (VidPage),a
+RestoreLoMem:  	ld   a,0
+				out  (LoPage),a
+RestoreStack:  	ld   sp,0
+				ei   
+				ret  
+				
+Version:		dm "***XOR for SAM Coupé v1.0***  By tobermory@cookingcircle.co.uk 2012"
+DiaStack:      	ds 120
+Screen1:       	db 0
+;--------------------------------------------------------
+				inc "keys.z80"		; Have to put includes at the top or symbols are not defined
+				inc "housekeeping.z80"
+				inc "replay.z80"
+				inc "frontend.z80"
+				inc "auto.z80"
+				inc "playlevel.z80"
+				inc "shield.z80"
+				inc "gfx.z80"
+				inc "sfx.z80"
+				inc "music.z80"
+
+				
+MainProg: 
+				call InitFrontEnd
+FrontEnd:							;Front End:
+				call WaitforFrame
+				call UpdateFrontEnd	;	Update front end effects
+									;	Check keys:
+				call Keys			;		Poll keys
+				ld a,%00011110		; 		If up/down selected, choose level
+				cp c
+				call nz,ChooseLevel
+				
+				bit FireBit,c		;		If fire selected, Play Level
+				jr nz,SkipPlayLevel
+				
+				call PlayLevel
+				cp Failure			;			If level completed
+				call nz,FillInLevelTable ;			Complete level table (moves taken, letter of cipher)
+				
+				jp MainProg			; 			Break out of Front End loop and Initiate Front End again
+SkipPlayLevel:
+				bit EscBit,c		;		If Escape selected, Quit Game
+				jr nz,FrontEnd			;Loop to Front End		
+QuitGame:							;Quit Game:
+				call ClearScreen
+				ret					;	END
+
+;--------------------------------------------------------
+ChooseLevel:
+				push bc
+				ld a,(LevelSelectDelay)
+				cp 0 
+				jr z,ChooseLevel2
+				dec a
+				ld (LevelSelectDelay),a
+				pop bc
+				ret
+ChooseLevel2:					
+				ld hl,CurrentLevel
+				bit DownBit,c
+				jr nz,SkipLevelUp
+LevelUp:
+				res DownBit,c
+				ld a,14			; level 15 is the last one
+				cp (hl)
+				jr z,SkipLevelUp
+				call PrintChooseLevel
+				xor a
+				call PrintLevelSpot
+				inc (hl)
+				ld a,255
+				call PrintLevelSpot
+				ld a,LevelMoveDelay
+				ld (LevelSelectDelay),a
+SkipLevelUp:
+				bit UpBit,c
+				jr nz,SkipLevelDown
+LevelDown:
+				res UpBit,c
+				xor a
+				cp (hl)
+				jr z,SkipLevelDown
+				call PrintChooseLevel
+				xor a
+				call PrintLevelSpot
+				dec (hl)
+				ld a,255
+				call PrintLevelSpot
+				ld a,LevelMoveDelay
+				ld (LevelSelectDelay),a
+SkipLevelDown:
+				pop bc
+				ret
+LevelSelectDelay: db 0
+LevelMoveDelay: equ 4
+SelectLevelTimer: db 0
+
+FillInLevelTable:
+; Called when level successfully completed.  Add in moves taken and letter
+				push af
+				ld a,(CurrentLevel)
+				ld b,a			; Find position for the completion letter
+				add a
+				add b
+				add a
+				add b
+				ld e,a
+				ld d,0
+				ld hl,MovesMess
+				add hl,de
+				pop af
+				ld (hl),a		; Store letter in level table
+				inc hl
+				inc hl
+				ex hl,de
+				
+				ld hl,MovesTakenMess
+				ldi
+				ldi
+				ldi
+				ldi
+				ret
+;---------------------------------------------------------
+
+PlayLevel:							;Play Level:
+				call CircleDownFrontEnd
+				call ImportLevelMap	;	Get level from memory
+				call InitiateLevel	;	Initiate level
+				call StartLevelWhoosh ;	Intro effect
+				call PrintDashboard	; 	right hand menu
+				call DrawMapFull	;	Draw initial level
+				
+				call InitMusic
+MainLoop:							;Main Loop:
+				call PlayMusic		;	Play Music
+				call WaitForFrame	
+				
+				ld a,(TweenAnimMode)		; If shield is in inbetween animations, update this
+				cp Yes
+				call z,TweenAnim
+				
+				ld a,(KeyDelay)		; Delay the game speed a bit
+				cp 0
+				jr z,PlayMainLoop
+				dec a
+				ld (KeyDelay),a
+				call ForcedDelay
+				jr MainLoop
+	PlayMainLoop:
+				
+				ld hl,(MovesTaken)	;	If too many moves, goto Moves Exceeded
+				ld bc,2000
+				sbc hl,bc
+				jp nc,MovesExceeded
+				
+				ld a,(ShieldsRemaining) ; If both shields dead, game over message
+				cp 0
+				jp z,ShieldsDead
+				
+				call isShieldOnExit	;	If completed level, goto Finished Level
+				jp z,FinishedLevel
+									;	Check mode:
+				ld a,(GameMode)		;		If mode is Auto
+				cp AutoGameMode
+				jp z,AutoModeLoop	;			Jump to Automatic
+				
+				cp MapViewMode		;		If mode is MapView
+				jp z,MapViewModeLoop ;			Jump to MapView
+
+UserModeLoop:	
+				ld a,(ReplayMode)	;			Check Keys:
+				cp Yes
+				jr nz,PlayNormal
+	Replayit:
+				call GetMove		; If in replay mode, get the next move and translate into a keypress
+				jr SkipPlayNormal
+	PlayNormal:
+				call keys			;				Poll keys
+				xor a
+				cp c				;				If nothing, ignore
+				jr z,MainLoop
+	SkipPlayNormal:
+				bit EscBit,c		;				If escape then goto Quit Level
+				call z,QuitLevel
+				
+				bit FireBit,c		;				If fire pressed then Swap Shield
+				call z,SwapShields
+				
+				bit CursUpBit,c		;				If Cursor up pressed then swap to map view
+				call z,SwapMapView	
+				
+				ld a,%00011110		;				If up/down/left/right then Move Shield
+				and c
+				cp 0
+				jr z,MainLoop
+				
+				call MoveShield
+				ld a,(DirtyCellsCount)
+				cp 0				;					If dirty cells created, change mode to Auto
+				call nz,ChangeToAuto
+				jp MainLoop			; 			Break out of loop back to Main Loop
+
+				
+AutoModeLoop:						;		else, mode is Automatic
+				call Keys			;			Poll keys
+				bit EscBit,c		;				If Escape then Quit Level
+				call z,QuitLevel
+				
+				call UpdateDirty	;			Update dirty cells
+				ld a,(DirtyCellsCount)
+				cp 0				;			if no cells dirty, change mode to User
+				call z,ChangeToUser
+				jp MainLoop			;Loop to Main Loop
+	
+MapViewModeLoop:
+				call Keys
+				bit CursUpBit,c
+				call z,SwapMapView
+				jp MainLoop
+
+KeyDelay:		db 0
+ReplayMode:		db No		
+;----------------------------------------------------------			
+QuitLevel:							;Quit Level:
+				pop hl				; Junk return to main loop, so next RET exits entirely
+				ld a,(ReplayMode)
+				cp Yes
+				ret z
+				
+				call StoreMove				
+				xor a
+				call CircleDownOnShield
+				call ReplayYN		;		Replay level if necessary
+				
+				ld a,Failure		;		Return Failure to Front End
+				ret					
+				
+;----------------------------------------------------------	
+ShieldsDead:				
+				call ReplayYN		;		Ask for replay of level Y/N
+				ld a,Failure		;		Return Failure to Front End	
+				ret
+								
+;----------------------------------------------------------	
+				
+FinishedLevel:						;	If completed level
+				call StoreMove
+				call CompleteLevelWhoosh ;	End Flair, success (type depends on levels completed)
+				ld a,(CompletionLetter)  ;	Return Success and moves total to Front End
+				ret					;		RET
+				
+MovesExceeded:
+				ld hl,MovesExceededMess
+				call GeneralWhoosh
+				
+				call ReplayYN		;		Ask for replay of level Y/N
+				ld a,Failure		;		Return Failure to Front End		
+				ret					;		RET
+
+MovesExceededMess: dm "Too many moves"
+				db EndMess
+
+;----------------------------------------------------------
+gfx:			mdat "gfx.raw"
+font:			mdat "font.raw"
+				inc "maps.z80"
+				inc "gfx2.z80"
+fegfx:			mdat "fegfx.raw"

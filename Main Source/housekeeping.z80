@@ -1,0 +1,113 @@
+;--------------------
+; HARDWARE REGISTERS
+PaletteBaseReg:	equ 248  	;Palette numbers are out'd to C=248
+							;with B=palette number
+StatusReg:    	equ 249   	;This tells when screen interrupts are
+							;present
+Lineintbit:   	equ 0     	
+Frameintbit:   	equ 3     	
+
+LoPage:        	equ 250   	;Low Page control reg (0-32767)
+HiPage:        	equ 251   	;High Page control reg (32768-65535)
+VidPage:       	equ 252   	;Video control reg (screen looks to
+							;first bytes of this page for pixels)
+							;NB Memory address 32768 is page ONE!
+BorderReg:     	equ 254
+ScreenReg:     	equ 254
+Mode1:         	equ 32*0
+Mode2:         	equ 32*1
+Mode3:         	equ 32*2
+Mode4:         	equ 32*3
+ROMout:        	equ 32
+
+LeftButton:    	equ 0
+Midbutton:     	equ 1
+RightButton:   	equ 2
+
+;--------------------
+; PAGE SYSTEM
+MainPage:      	equ 1     ;Our program starts at 32768
+
+
+;---------------------
+; OTHER EQUATES
+
+Success:		equ 0
+Failure:		equ 1
+
+;--------------------
+SetPalette:
+				ld bc,4344
+				ld hl,Palette1+15
+				otdr 
+				ret  
+Palette1:
+				db 0,8,7,96,112,120,119,82,122,17,50,110,70,34,93,127
+
+WaitforFrame:			
+				push af
+				;ld a,15
+				;out (BorderReg),a
+FrameWait2:
+				in a,(StatusReg)
+				bit 3,a
+				jr nz,FrameWait2
+				
+				;xor a
+				;out (BorderReg),a
+				pop af
+				ret  
+ClearScreen:
+				push bc
+				push de
+				push hl
+				ld de,1
+				ld hl,0
+				ld bc,24576
+				ld (hl),0
+				ldir 
+				pop hl
+				pop de
+				pop bc
+				ret 
+ClearGameScreen:
+; Only clear the gaming area
+				ld b,192
+				ld de,1
+				ld hl,0
+	ClearGameScreenLoop:
+				push bc
+				ld bc,96
+				ld (hl),0
+				ldir
+				ld bc,128-96
+				add hl,bc
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				pop bc
+				djnz ClearGameScreenLoop
+				ret
+				
+WaitBFrames:
+				call WaitForFrame
+				call ForcedDelay
+				djnz WaitBFrames
+				ret
+				
+ForcedDelay:
+				push bc
+				ld b,0
+	ForcedDelayLoop:
+				nop
+				nop
+				nop
+				nop
+				nop
+				nop
+				nop
+				nop
+				djnz ForcedDelayLoop
+				pop bc
+				ret
+				

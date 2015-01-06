@@ -1,0 +1,729 @@
+; Play Level module
+
+; There are two main 'game modes', User and Auto.
+;
+; UserGameMode is when keyboard is polled, and up/down/left/right results in movement.
+; When a shield is moved, any cells that are affected by it are tagged as 'dirty' (just like in Excel),
+; and then mode switches to Auto.
+
+; Auto game mode only polls for certain keypresses (quit etc), otherwise it processes the dirty cells,
+; which may require animation (bombs exploding), or movement (eg fish falling).  Movement will turn
+; other cells dirty.  When dirty cells don't affect other cells any more, they are marked clean again.
+; When all cells are clean, mode goes back to User.
+
+; ShieldMove and Explode game modes are animation modes: when a shield moves but is not push-scrolling
+; the screen, it can move more smoothly.  Explosions take precedent over other objects moving in Auto
+; mode.
+
+Yes:			equ 0
+No:				equ 1
+MoveDelay:		equ 3		; Updates are too fast when not scrolling
+ScrollDelay:	equ 0		; Updates are too fast when scrolling too!
+TweenOffset:	equ 4		; How many bytes (2 pix) to move shield when inbetweening 
+
+UserGameMode:	equ -1
+AutoGameMode:	equ -2
+ShieldMoveGameMode: equ -3
+ExplodeGameMode:equ -4
+MapViewMode:	equ -5
+
+GameMode:		db 0
+ShieldsRemaining: db 0
+MasksRemaining:	db 0
+MovesTaken:		dw 0
+MovesTakenDA:	dw 0
+MovesTakenMess:	dm "  00 "
+				db EndMess
+ExitPosition:	db 0,0
+
+Magus:
+MagusPosition:	db 0,0
+MagusMapOff:	db 0,0
+MagusMapAddress:dw 0
+MagusMapCode:	db "1","2"
+
+Questor:
+QuestorPosition:db 0,0
+QuestorMapOff:	db 0,0
+QuestorMapAddress: dw 0
+QuestorMapCode:	db "2","1"
+
+Current:
+CurrentShieldPos: db 0,0
+CurrentMapOff:	db 0,0
+CurrentMapAddress: dw 0
+CurrentShieldCode: db 0
+OtherShieldCode: db 0
+PrevMapOff:		db 0,0
+
+MapCollected:	db 0 
+
+CurrentShield:	db 0			; This can be 0 or 1 for Magus or Questor
+CurrentLevel:	db 0
+Lights:			db Yes
+
+BMUSMapOff:						; BMUS have their own map offsets for when you emerge from them.
+BMUS1MapOff:	db 0,0
+BMUS2MapOff:	db 0,0
+CompletionLetter: db 0			; This is what's given back if we successfully complete
+
+CurrentMap:		ds 32*32
+
+;----------------------------------------------------------
+InitiateLevel:
+				call ResetGameMode					; Assume user has control in first instance
+				call ResetShieldsPosition			; Find shield starting place and fill Coords
+				call ResetMovesTaken				; Moves=0
+				call ResetShieldsRemaining			; Always start with 2 shields
+				call ResetMasksRemaining			; Count masks for tally
+				call ResetExitPosition				; Find exit and fill coords
+				call ResetMapCollected				; Reset which bits of map have been collected
+				call ResetDirtyCellsCount			; Reset moving items list to 0
+				call SetCurrentShieldMagus			; Make Magus (stripy shield) the current shield
+				call ResetReplay					; Get ready to record the level for replay
+				call ResetLights
+				ret
+				
+SetCurrentShieldMagus:
+				xor a
+				ld (CurrentShield),a
+	LoadShield:
+				ld de,Current
+				ld bc,8
+				ld hl,Magus
+				cp 0
+				jr z,SkipSetOtherShield
+	SetOtherShield:
+				ld hl,Questor
+	SkipSetOtherShield:
+				ldir
+				ret
+;----------------------------------------------------------				
+SwapShields:
+				ld a,(KeyOutputOld)
+				bit FireBit,a				; Don't swap if this isn't a new keypress
+				ret z
+
+				ld a,(ShieldsRemaining)
+				cp 2
+				ret nz
+				
+				push bc
+				
+				xor a
+				call CircleDownOnShield
+				
+; Save map offset history
+				call UpdateMapHistory	
+				call StoreMove				; Record this move
+; Save current settings 
+				ld hl,Current
+				ld bc,8
+				ld de,Magus
+				ld a,(CurrentShield)
+				cp 0
+				jr z,SkipOtherShield
+	OtherShield:
+				ld de,Questor
+	SkipOtherShield:
+				ldir
+; Now swap to the other shield 
+				ld a,(CurrentShield)
+				xor 1
+				ld (CurrentShield),a
+; And move these details into current
+				ld de,Current
+				ld bc,8
+				ld hl,Magus
+				cp 0
+				jr z,SkipOtherShield2
+	OtherShield2:
+				ld hl,Questor
+	SkipOtherShield2:
+				ldir
+				call DrawMapFull
+				call IncMovesTaken
+				call PrintDashboard
+				pop bc
+				ret
+				
+;----------------------------------------------------------
+ResetShieldsPosition:
+; Search map for shields position
+				ld hl,CurrentMap+(32*32)-1			; Loop through the map from end to start
+				ld b,32								; This is so the loop counters are close to coord values
+	ResetShieldsPosLoop1:
+				ld c,32
+	ResetShieldsPosLoop2:
+				ld a,(hl)							; Check for a match of Magus
+				cp "1"
+				jr nz,SkipSetShield1
+	SetShield1:											; If match found, b-1,c-1 are the coords
+				dec b
+				dec c
+				ld (MagusPosition),bc
+				ld (MagusMapAddress),hl					; Also store the real address in the map of the "1"
+				inc b
+				inc c
+	SkipSetShield1:
+				cp "2"								; Repeat for Questor
+				jr nz,SkipSetShield2
+	SetShield2:
+				dec b
+				dec c
+				ld (QuestorPosition),bc
+				ld (QuestorMapAddress),hl
+				inc b
+				inc c
+	SkipSetShield2:
+				dec hl
+				dec c
+				jr nz,ResetShieldsPosLoop2
+				djnz ResetShieldsPosLoop1
+				ret
+
+				
+;---------------			
+ResetMovesTaken:
+				ld hl,0
+				ld (MovesTaken),hl
+				ld (MovesTakenDA),hl
+				ld h,"0"
+				ld l,"0"
+				ld (MovesTakenMess),hl
+				ld (MovesTakenMess+2),hl
+				ret
+;---------------
+IncMovesTaken:
+				push af
+				push bc
+				push de
+				push hl
+				
+				ld hl,(MovesTaken)		; Update Moves Taken
+				inc hl
+				ld (MovesTaken),hl
+				
+				and a				; Reset carry flag
+				ld a,(MovesTakenDA)	; Now do the same for the printed version
+				inc a
+				daa
+				jr nc,SkipIncMovesTakenMSB		; There could be up to 4 digits of data to print
+	IncMovesTakenMSB:
+				push af
+				and a				
+				ld a,(MovesTakenDA+1)
+				inc a
+				daa
+				ld (MovesTakenDA+1),a
+				
+				push af
+				rrca
+				rrca
+				rrca
+				rrca
+				and %00001111
+				add "0"
+				ld (MovesTakenMess),a
+				pop af
+				and %00001111
+				add "0"
+				ld (MovesTakenMess+1),a
+				
+				pop af
+	SkipIncMovesTakenMSB:
+				ld (MovesTakenDA),a
+				push af
+				rrca
+				rrca
+				rrca
+				rrca
+				and %00001111
+				add "0"
+				ld (MovesTakenMess+2),a
+				pop af
+				and %00001111
+				add "0"
+				ld (MovesTakenMess+3),a
+				
+				call PrintMovesTaken
+				
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret
+				
+PrintMovesTaken:
+				
+				ld hl,MovesTakenMess
+				ld de,128*178-18
+				ld a,1
+				call PrintStr
+				ret
+				
+;---------------
+ResetShieldsRemaining:
+				ld a,2
+				ld (ShieldsRemaining),a
+				ret
+DecShieldsRemaining:
+; Decrease shields left.  Return Z if there's one shield left (ie not totally dead)
+				ld hl,ShieldsRemaining
+				dec (hl)
+				ld a,1
+				cp (hl)
+				ret
+
+;---------------				
+ResetMasksRemaining:						; Count masks in current map
+				ld hl,CurrentMap
+				
+				ld e,0
+				xor a		; DAA version for the screen
+				ex af,af'
+				ld a,"@"	; Mask sign in text format
+
+				ld c,32
+	ResetMasksRemainingLoop1:
+				ld b,32
+	ResetMasksRemainingLoop2:
+				cp (hl)
+				jr nz,SkipIncCount
+				inc e
+				ex af,af'
+				inc a
+				daa
+				ex af,af'
+				
+	SkipIncCount:
+				inc hl
+				djnz ResetMasksRemainingLoop2
+				dec c
+				jr nz,ResetMasksRemainingLoop1
+				
+				ld hl,MasksRemaining
+				ld (hl),e
+				
+				xor a						; Reset the masks collected counter on screen
+				ld (MasksCollectedDA),a
+				ld a,"0"
+				ld (MasksCollectedMess),a
+				ld (MasksCollectedMess+1),a
+				
+				
+				ex af,af'	; Set total masks message on screen
+				push af
+				rra
+				rra
+				rra
+				rra
+				and %00001111
+				add "0"
+				ld (TotalMasks),a
+				pop af
+				and %00001111
+				add "0"
+				ld (TotalMasks+1),a
+				ret
+				
+PrintTotalMasks:
+				ld de,84*128-15
+				ld hl,TotalMasks
+				ld a,1
+				call PrintStr
+				ret
+				
+TotalMasks:		dm "00"
+				db 255
+				
+;---------------
+DecMaskCount:						; Called when we collect a mask. Decrease remaining
+				push af
+				push hl
+				ld hl,MasksRemaining
+				dec (hl)
+				
+				ld a,(MasksCollectedDA)	; And increase collected count (decimally adjusted for printing)
+				inc a
+				daa
+				ld (MasksCollectedDA),a
+				
+				call PrintMasksCollected
+				pop hl
+				pop af
+				ret
+				
+PrintMasksCollected:
+				push af
+				push bc
+				push de
+				push hl
+				
+				ld a,(MasksCollectedDA)
+				push af
+				rra
+				rra
+				rra
+				rra
+				and %00001111
+				add "0"
+				ld (MasksCollectedMess),a
+				pop af
+				and %00001111
+				add "0"
+				ld (MasksCollectedMess+1),a
+				
+				ld de,121*128-15
+				ld hl,MasksCollectedMess
+				ld a,1
+				call PrintStr
+
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret
+				
+MasksCollectedDA: db 0
+MasksCollectedMess: dm "00 "
+				db EndMess
+;---------------
+ResetMapCollected:
+; We keep a tally of which bits of map have been collected
+				xor a
+				ld (MapCollected),a
+				ret
+				
+;---------------
+SwapLights:							; Called when a sad mask is collected, turn lights on or off
+				push af
+				ld a,(Lights)
+				xor 1
+				ld (Lights),a
+				call DrawMapFull
+				pop af
+				ret
+ResetLights:
+				push af
+				ld a,Yes
+				ld (Lights),a
+				pop af
+				ret
+
+;---------------	
+ResetExitPosition:
+; Search map for exit position
+				ld hl,CurrentMap+(32*32)-1			; Loop through the map from end to front
+				ld b,32
+	ResetExitPosLoop1:
+				ld c,32
+	ResetExitPosLoop2:
+				ld a,(hl)							; Check for a match
+				cp "E"
+				jr nz,SkipFoundExit
+	FoundExit:											; If match found, b-1,c-1 are the coords
+				dec b
+				dec c
+				ld (ExitPosition),bc
+				inc b
+				inc c
+	SkipFoundExit:
+				dec hl
+				dec c
+				jr nz,ResetExitPosLoop2				
+				djnz ResetExitPosLoop1
+				ret
+				
+;---------------					
+ResetDirtyCellsCount:
+				xor a
+				ld (DirtyCellsCount),a
+				ret
+				
+IncDirtyCellsCount:
+				push af
+				ld a,(DirtyCellsCount)
+				inc a
+				ld (DirtyCellsCount),a
+				pop af
+				ret
+				
+;---------------				
+ImportLevelMap:		; Get level from storage - this ensures nothing is corrupted from repeating the same level
+				in a,(LoPage)
+				ld (RestoreImportLo+1),a
+				ld a,3+ROMout
+				out (LoPage),a
+				call ServeMap			; See map.z80
+	RestoreImportLo: ld a,0
+				out (LoPage),a
+				ret
+				
+;---------------		
+PrintDashboard:
+				call PrintTotalMasks
+				call PrintPanelBorders
+				call PrintCurrShieldIcon
+				call PrintPanelMask
+				call PrintMovesTaken
+				call PrintMasksCollected
+				call PrintLevelMess
+				call PrintMapPieces
+				ret
+				
+PrintLevelMess:
+				ld hl,LevelMess
+				ld de,10*128-19
+				ld a,1
+				call PrintStr
+				
+				ld a,(CurrentLevel)
+				inc a
+				sbc 9
+				add 9
+				jr c,EarlyLevel
+	LaterLevel:
+				sub 9
+				ex af,af'
+				ld a,"1"
+				jr EarlyLevel2
+	EarlyLevel:
+				ex af,af'
+				ld a,"0"
+	EarlyLevel2:
+				ld (LevelMess2),a
+				ex af,af'
+				add "0"
+				ld (LevelMess2+1),a
+				
+				ld hl,LevelMess2
+				ld de,(16*128)-15
+				ld a,1
+				call PrintStr
+				ret
+
+				
+LevelMess:		dm "LEVEL"
+				db EndMess
+LevelMess2:		dm "00"
+				db EndMess
+				
+PrintPanelMask:
+				ld de,94*128-18
+				ld hl,gfx+60
+				call PrintBlock
+				ret
+
+PrintCurrShieldIcon:
+				push af
+				push de
+				push hl
+				
+				ld de,150*128-18
+				ld hl,gfx+48		; Magus
+				ld a,(CurrentShieldCode)
+				cp "2"
+				jp nz,PrintMagusIcon
+	PrintQuestorIcon:
+				ld hl,gfx+36		; Questor
+	PrintMagusIcon:
+				call PrintBlock
+				
+				pop hl
+				pop de
+				pop af
+				
+				ret
+				
+PrintBlock:
+				ld a,24
+				ld bc,(256-24)/2
+PrintBlockLoop2:
+				push bc
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				ldi
+				pop bc
+				add hl,bc
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				dec a
+				jr nz,PrintBlockLoop2
+				ret
+				
+;---------------	
+UpdateMapHistory:
+				push hl
+				ld hl,(CurrentMapOff)
+				ld (PrevMapOff),hl
+				pop hl
+				ret
+
+CountMasksRemaining:
+				ld a,(MasksRemaining)
+				cp 0
+				ret 
+
+
+				
+;----------------------------------------------------------					
+SwapMapView:
+; When Cursor up pressed, print map/swap back to user mode.
+				ld a,(KeyOutputOld)
+				bit CursUpBit,a			; Return if this is not a new keypress
+				ret z
+				
+				ld a,(GameMode)
+				cp MapViewMode
+				jr nz,TurnMapOn
+TurnMapOff:
+				ld a,UserGameMode
+				ld (GameMode),a
+				call DrawMapFull
+				call PrintDashboard
+				ret
+TurnMapOn:
+				ld a,MapViewMode
+				ld (GameMode),a
+				call ClearGameScreen
+				call PrintMapQuarters
+				ret
+							
+;---------------	(Should this be in gfx.z80?)			
+PrintMapQuarter:
+				push af
+				ld bc,16*256+16
+	PrintMapYLoop:
+				push bc
+				push de
+				push hl
+	PrintMapXLoop:
+				ld a,(hl)
+				push hl
+				call PrintMapCell
+				pop hl
+				inc hl
+				inc e
+				inc e
+				inc e
+				djnz PrintMapXLoop
+				pop hl
+				ld bc,32
+				add hl,bc
+				
+				pop de
+				inc d
+				inc d
+				inc d
+				
+				pop bc
+				dec c
+				jr nz,PrintMapYLoop
+				pop af
+				ret
+	
+;---------------	
+PrintMapCell:
+; The map is a 32*32 matrix of 6*6 cells.
+				ld hl,Gfx+(48*128)+59
+				cp " "			; Only print 3 things: masks, exit door, and walls
+				ret z
+				ld hl,Gfx+120
+				cp "#"
+				jr z,PrintMapCell2
+				ld hl,Gfx+(12*128)+120
+				cp "E"
+				jr z,PrintMapCell2
+				ld hl,Gfx+(6*128)+120
+				cp "@"
+				ret nz
+	PrintMapCell2:
+				push bc
+				push de
+				ld b,6
+	PrintMapCellLoop:
+				push bc
+				push de
+				push hl
+				ldi
+				ldi
+				ldi
+				pop hl
+				ld bc,128
+				add hl,bc
+				pop de
+				ex de,hl
+				add hl,bc
+				ex de,hl
+				pop bc
+				djnz PrintMapCellLoop
+				pop de
+				pop bc
+				ret
+;----------------------------------------------------------					
+		
+ResetGameMode:
+ChangeToAuto:
+				ld a,AutoGameMode
+				ld (GameMode),a
+				;call ResetAutoCount
+				ret
+				
+ChangeToUser:
+				ld a,UserGameMode
+				ld (GameMode),a
+				ret
+
+;----------------------------------------------------------	
+isShieldOnExit:
+; Return Zero flag raised if one shield is on the exit.
+; Shield cannot move to exit unless all masks have been collected (so don't bother testing for it)
+				xor a
+				ld hl,(CurrentShieldPos)
+				ld de,(ExitPosition)
+				sbc hl,de
+				ret			
+
+;----------------------------------------------------------	
+ReplayYN:
+;We've failed or quit.  Ask user if they want to see a replay
+				ld hl,ReplayMess
+				ld de,176*128+30
+				ld a,1
+				call PrintStr
+				ld b,10
+				call WaitBFrames
+			
+	ReplayYNLoop:
+				call KeysYN
+				ld a,255
+				cp c
+				jr z,ReplayYNLoop
+				
+				bit NoBit,c
+				ret z
+				
+ReplayLevel:
+				call RestartReplay
+				ld a,Yes
+				ld (ReplayMode),a
+				call PlayLevel
+				
+				ld a,No
+				ld (ReplayMode),a
+				
+				jp ReplayYN	
+				
+ReplayMess:		dm "Replay? Y/N"
+				db EndMess

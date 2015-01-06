@@ -1,0 +1,76 @@
+                        ---   ---   -----   -------
+                         \     /   /     \   |     \
+                          \   /   |       |  |     |
+                           \ /    |       |  |----<
+                           / \    |       |  |    |
+                          /   \   |       |  |    |
+                         /     \   \     /   |    \ |
+                        ---   ---   -----   --     -
+
+                         (C) LOGOTRON/ASTRAL SOFTWARE
+
+
+                          AMSTRAD CPC CASSETTE/DISK
+                          SPECTRUM 48/128K CASSETTE
+                        COMMODORE 64/128 CASSETTE/DISK
+
+
+                                   LOGOTRON
+                                 RECREATIONAL
+                                   PRODUCTS
+                                 ------------
+
+   LOGOTRON LIMITED, DALES BREWERY, GWYDIR STREET, CAMBRIDGE CB1 2LJ ENGLAND
+
+
+THE OBJECTIVES OF THE GAME
+To complete all 15 levels!! As you go through the door of each level you will
+be given a letter, note down the 15 letters. These letters will make up an
+encrypted clue to XOR's true nature. By the way you cannot pass through the
+door until you have collected all of the masks at each level.
+
+Note that you cannot enter mazes 11, 13, and 15 until you have completed levels
+10, 12 and 14 respectively. In your exploration of the mazes you will
+encounter falling fish, two kinds of force field, spring loaded chickens,
+fizzer bombs and pressure bombs, BMUS (Beam Me Up Scottie), dolls, doors, maps
+and masks which are not always quite what they seem.
+
+We won't tell you any more - because the fun of the game is in discovering the
+properties of these different features! Needless to say, you often need both
+your shields. The games are graded and the bottom levels are suicidal!
+
+PLAYING INSTRUCTIONS
+XOR will confront you while the program loads. Press any key to exit the
+subsequent scenario scene.
+
+For SPECTRUM users- to select the appropriate joystick interface or keyboard,
+press the number corresponding to your desired choice and then press RETURN.
+
+Note that the following joystick interfaces are supported: KEMPSTON, PROTEK,
+SINCLAIR (port 1).
+
+For AMSTRAD and COMMODORE users, the joystick and keyboard work simultaneously.
+
+To select a maze, move up and down the list of mazes using your joystick or
+keyboard controls (see below) and press RETURN at your desired selection.
+
+KEYBOARD CONTROLS
+X move to the LEFT
+Z move to the RIGHT
+P Spectrum, [ Amstrad, ; Commodore to move UP
+L Spectrum, ; Amstrad, / Commodore to move DOWN
+RETURN or joystick FIRE switch to alternate Hero
+M for SPECTRUM and AMSTRAD users to toggle between Maze and Map
+E to Exit current maze
+Y/N for action replay/restart
+H to hold action (during replay)
+Space bar to single step through action (during replay)
+O to switch sound on/off
+
+The number of masks to be collected, the number of masks you have already
+collected and the moves to date are shown in windows on the play screen.
+
+If you solve all 15 levels you qualify to become a Member of the Order of XOR,
+with a certificate and badge to prove it.
+
+Send the decoded anagram to the address on the front of this booklet.

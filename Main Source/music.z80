@@ -1,0 +1,9 @@
+; Music - not really sure if this is going to happen
+
+InitMusic:
+;STUBBED
+				ret
+
+PlayMusic:
+;STUBBED
+				ret

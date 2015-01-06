@@ -1,0 +1,58 @@
+; Replay feature
+
+; This is achieved by storing the moves taken (left right up down swap quit/end)
+; and replaying then back through the normal game engine later.
+
+; I could definitely be more memory efficient with this (1 byte per move stored), but what the hell.
+; Get it finished.
+; You only need to store the moves and play them back sequentially, nothing fancy needed.
+
+ReplayMem:		
+				ds 2000				; This is the store for the actual moves
+				db %10000000		; If you run out of moves this terminates the memory.
+ReplayPos:		dw ReplayMem		; This shows where we are right now (for recording or replay)
+
+
+RestartReplay:
+				ld a,(ReplayMode)
+				cp Yes
+				ret z
+				ld hl,ReplayMem		; Reset the stored position
+				ld (ReplayPos),hl
+				ret
+
+ResetReplay:
+				ld a,(ReplayMode)
+				cp Yes
+				ret z
+				
+				call RestartReplay
+				ld a,128
+				ld (hl),a
+				ret
+
+StoreMove:
+				push af
+				ld a,(ReplayMode)
+				cp Yes
+				jr z,SkipStoreMove
+				push hl
+				ld hl,(ReplayPos)	; Get position to store in hl
+				ld a,(KeyOutput)
+				ld (hl),a
+				inc hl
+				ld (ReplayPos),hl
+				pop hl
+	SkipStoreMove:
+				pop af
+				ret
+
+GetMove:
+				push hl
+				ld hl,(ReplayPos)
+				ld c,(hl)
+				inc hl
+				ld (ReplayPos),hl
+				pop hl
+				ret
+			
