@@ -1,0 +1,804 @@
+; Auto Mode here
+; All chicken/fish/dolly movement, explosions etc happens here in Auto mode
+; While in auto mode, user cannot move shields
+; Switches back to User mode when dirty cell count is back to 0
+
+DirtyCellsCount:db 0
+UpdateDirtyType:db 0
+UpdateLeftRight:equ -1
+UpdateUpDown: 	equ -2
+
+TopRightDirtyCell: dw 65535		; Unused right now
+BottomLeftDirtyCell: dw 0		; Unused - could use to speed up auto-updates
+
+StoreTopRightDirtyCell:
+				ret
+				push de
+				push hl
+				ld de,31
+				sbc hl,de
+				ld (TopRightDirtyCell),hl
+				pop hl
+				pop de
+				ret
+ResetTopRightDirtyCell:
+				ret
+				push hl
+				ld hl,65535
+				ld (TopRightDirtyCell),hl
+				pop hl
+				ret
+
+UpdateDirty:
+				ld a,(UpdateDirtyType)	; Get last keypoll
+				cp UpdateLeftRight		; If it was left or right					
+				jr z,UpdateDirtyLR	; 	use the up-down scan
+				; otherwise proceed to left-right scan
+				
+; It's important you use the correct scan when updating, as XOR has a peculiarity that is crucial to finishing:
+; Say you grab a mask that has a chicken beside AND a fish on top of it.  XOR ensures you can move away in 
+; either direction, and the correct item will always go first - move left and the fish will fall, protecting 
+; you from getting killed by the chicken.  And the other way round.  You can check this in The Challenge
+; quite easily.
+
+
+UpdateDirtyUD:	; Called when movement was vertical (allows chickens precedent)
+				ld e,0				; Keep tally of dirty cells (start with 0)
+				
+				ld hl,CurrentMap+(32*31)
+				ld c,32
+	CheckDirtyCellLoop4:
+				ld b,32
+	CheckDirtyCellLoop3:
+				;push de
+				;ld de,(TopRightDirtyCell)	; Check if we are too far from a dirty cell to make more changes
+				;and a
+				;sbc hl,de
+				;add hl,de
+				;pop de
+				;jr c,FinishedUpdateDirtyUD
+				
+				ld a,(hl)
+				push bc
+				push hl
+				
+				cp "<"
+				call z,CheckChicken
+				cp "!"
+				call z,CheckFish
+				cp "o"
+				call z,CheckOBomb	; O-bombs are round and fall to gravity
+				cp "O"
+				call z,CheckOBomb	; if they are capital letters they are moving (and shouldn't explode)
+				cp "x"
+				call z,CheckXBomb	; X-bombs are red and spring-load left
+				cp "X"
+				call z,CheckXBomb
+				cp "7"
+				call z,CheckDollyLeft	; If 7890 are found, this is a dolly in motion. (LRUD)
+				cp "8"					; Try to continue moving these in the same direction
+				call z,CheckDollyRight	; change back to a D (static dolly) if can't move
+				cp "9"
+				call z,CheckDollyUp
+				cp "0"
+				call z,CheckDollyDown
+				pop hl
+				
+				inc hl
+				pop bc
+				djnz CheckDirtyCellLoop3
+				
+				push bc
+				xor a
+				ld bc,64
+				sbc hl,bc
+				pop bc
+				
+				dec c
+				jr nz,CheckDirtyCellLoop4
+	FinishedUpdateDirtyUD:
+				ld a,e
+				ld (DirtyCellsCount),a
+				ret
+
+				
+UpdateDirtyLR:	;Called when movement was horizontal (allows fish precedent)
+				ld e,0				; Keep tally of dirty cells (start with 0)
+				
+				ld hl,CurrentMap+(32*31)
+				ld c,32
+	CheckDirtyCellLoop2:
+				push hl
+				ld b,32
+	CheckDirtyCellLoop:
+				;push de
+				;ld de,(TopRightDirtyCell)	; Check if we are too far from a dirty cell to make more changes
+				;and a
+				;sbc hl,de
+				;add hl,de
+				;pop de
+				;jr c,FinishedUpdateDirtyLR
+				
+				ld a,(hl)
+				push bc
+				push hl
+				
+				cp "<"
+				call z,CheckChicken
+				cp "!"
+				call z,CheckFish
+				cp "o"
+				call z,CheckOBomb	; O-bombs are round and fall to gravity
+				cp "O"
+				call z,CheckOBomb
+				cp "x"
+				call z,CheckXBomb	; X-bombs are red and spring-load left
+				cp "X"
+				call z,CheckXBomb
+				cp "7"
+				call z,CheckDollyLeft	; If 7890 are found, this is a dolly in motion. (LRUD)
+				cp "8"					; Try to continue moving these in the same direction
+				call z,CheckDollyRight	; change back to a D (static dolly) if can't move
+				cp "9"
+				call z,CheckDollyUp
+				cp "0"
+				call z,CheckDollyDown
+				pop hl
+				
+				ld bc,32
+				xor a
+				sbc hl,bc
+				pop bc
+				
+				djnz CheckDirtyCellLoop
+				
+				pop hl
+				inc hl
+				
+				dec c
+				jr nz,CheckDirtyCellLoop2
+	FinishedUpdateDirtyLR:
+				ld a,e
+				ld (DirtyCellsCount),a
+				ret
+				
+CheckChicken:
+				dec hl				; 	Find new position for chicken
+				ld a,"-"			;	Not if stopped by anything but green forcefield
+				cp (hl)
+				jr z,MoveChicken
+				ld a," "
+				cp (hl)
+				jr nz,SkipMoveChicken
+	MoveChicken:
+				ld a,"<"
+				ld (hl),a			; 	If we're moving, put the new position in the map
+				call PrintGfxFromAddress
+				
+				inc hl
+				ld a," "
+				ld (hl),a			;	And clear off the old position
+				call PrintGfxFromAddress
+				call StoreTopRightDirtyCell
+				inc e
+				
+				dec hl
+				dec hl
+				ld a,(hl)
+				cp "1"				;	Check if the chicken has hit a shield
+				call z,KillShield	; 	If so, kill it off
+				cp "2"
+				call z,KillShield
+				cp "o"				; 	If the chicken has hit a bomb
+				call z,ExplodeOHoriz ;		then start this animation (etc)
+				cp "x"
+				call z,ExplodeXHoriz
+				inc hl
+				inc hl
+				
+				inc hl
+				ld a,"<"
+				cp (hl)
+				call z,CheckChicken	; If a chicken follows another chicken, it moves before any fish/obomb
+	SkipMoveChicken:
+				xor a
+				ret
+				
+								
+CheckFish:
+				ld bc,32
+				add hl,bc
+				ld a,"|"
+				cp (hl)
+				jr z,MoveFish
+				ld a," "
+				cp (hl)
+				jr z,MoveFish
+				xor a
+				sbc hl,bc
+				xor a
+				ret
+	MoveFish:
+				ld a,"!"
+				ld (hl),a
+				call PrintGfxFromAddress
+				xor a
+				sbc hl,bc
+				ld a," "
+				ld (hl),a
+				call PrintGfxFromAddress
+				call StoreTopRightDirtyCell
+				inc e
+				
+				add hl,bc
+				add hl,bc
+				ld a,(hl)
+				cp "1"				;	Check if the fish has hit a shield
+				call z,KillShield	; 	If so, kill it off
+				cp "2"
+				call z,KillShield
+				cp "o"
+				call z,ExplodeOVert
+				cp "x"
+				call z,ExplodeXVert
+				xor a
+				sbc hl,bc
+				sbc hl,bc
+				
+				sbc hl,bc			; If a fish follows another fish, this takes precedent over a chicken/xbomb
+				ld a,"!"
+				cp (hl)
+				call z,CheckFish
+				
+				xor a
+				ret
+
+CheckXBomb:
+				dec hl				
+				ld a,"-"			
+				cp (hl)
+				jr z,MoveXBomb
+				ld a," "
+				cp (hl)
+				jr z,MoveXBomb
+				inc hl
+				ld (hl),"x"			; Make sure if it hasn't moved that it's lower case (for stationery)
+				xor a
+				ret
+	MoveXBomb:
+				ld a,"x" ; Guess that it'll be a static bomb (we check for this later)
+				ld (hl),a
+				call PrintGfxFromAddress
+				inc hl
+				ld a," "
+				ld (hl),a
+				call PrintGfxFromAddress
+				call StoreTopRightDirtyCell
+				inc e
+				
+				dec hl			; Check destination - has bomb hit something?
+				dec hl
+				ld a,(hl)
+				cp "1"				;	Check if the bomb has hit a shield
+				call z,KillShield	; 	If so, kill it off
+				cp "2"
+				call z,KillShield
+				cp "o"				;	If hit another bomb, the other bomb explodes
+				call z,ExplodeOHoriz
+				cp "x"
+				call z,ExplodeXHoriz
+				cp " " ; If it hasn't been stopped, make it a moving bomb
+				call z,MovingXBomb
+				cp "-"
+				call z,MovingXBomb
+				
+				inc hl
+				inc hl
+				
+				xor a
+				ret
+				
+	MovingXBomb:	; Turn back into a moving bomb
+				push af
+				ld a,"X"
+				inc hl
+				ld (hl),a
+				dec hl
+				pop af
+				ret
+				
+CheckOBomb:
+				push bc
+				ld bc,32
+				add hl,bc
+				ld a,"|"
+				cp (hl)
+				jr z,MoveOBomb
+				ld a," "
+				cp (hl)
+				jr z,MoveOBomb
+				xor a
+				sbc hl,bc
+				ld (hl),"o"
+				pop bc
+				xor a
+				ret
+	MoveOBomb:
+				ld a,"o"
+				ld (hl),a
+				call PrintGfxFromAddress
+				xor a
+				sbc hl,bc
+				ld a," "
+				ld (hl),a
+				call PrintGfxFromAddress
+				call StoreTopRightDirtyCell
+				inc e
+				
+				add hl,bc
+				add hl,bc
+				ld a,(hl)
+				cp "1"				;	Check if the chicken has hit a shield
+				call z,KillShield	; 	If so, kill it off
+				cp "2"
+				call z,KillShield
+				cp "o"
+				call z,ExplodeOVert
+				cp "x"
+				call z,ExplodeXVert
+				cp " " ; If it hasn't been stopped, make it a moving bomb
+				call z,MovingOBomb
+				cp "|"
+				call z,MovingOBomb
+				
+				xor a
+				sbc hl,bc
+				sbc hl,bc
+				
+				pop bc
+				xor a
+				ret	
+
+	MovingOBomb:
+				push af
+				xor a
+				sbc hl,bc
+				ld (hl),"O"
+				add hl,bc
+				pop af
+				ret
+				
+PrintDirtyCellCount:
+				push af
+				push de
+				ld a,(DirtyCellsCount)
+				add "0"
+				ld (DirtyCellsCountText),a
+				ld hl,DirtyCellsCountText
+				ld de,97
+				ld a,1
+				call PrintStr
+				pop de
+				pop af
+				ret
+DirtyCellsCountText:
+				dm "0"
+				db EndMess
+				
+				
+KillShield:
+				push af
+				push bc
+				push de
+				push hl
+				
+				ld (hl),"B"
+				call ExplodeAnim
+							
+				call DrawMapFull
+				call ResetTopRightDirtyCell
+				
+				push af
+				ld a,(ShieldsRemaining)
+				cp 2
+				call z,WhoopsWhoosh	; Display WHOOPS message
+				cp 1
+				call z,GotchaWhoosh	; Or Gotcha if totally dead 
+				pop af
+				ld (hl)," "			; Remove shield from map
+				
+				ld hl,CurrentShieldCode		; If current shield was killed
+				cp (hl)
+				jr nz,QuitKillShield
+				call SwapShields	;		Try swapping to other shield (will return if only one left)
+				
+QuitKillShield:
+				call DecShieldsRemaining	;	Decrease shields left
+				pop hl					; Mainloop will handle game over message if no shields left
+				pop de
+				pop bc
+				pop af
+				ret
+				
+ExplodeShield:
+				ld (ThisShield+1),a
+				ld a,Yes
+				ld (ShieldExploded),a
+				ret
+ShieldExploded: db No
+
+ExplodeShield2:
+				push af
+				push bc
+				push de
+				push hl
+				
+				push af
+				
+				ld a,No
+				ld (ShieldExploded),a
+				
+				ld a,(ShieldsRemaining)
+				cp 2
+				call z,WhoopsWhoosh	; Display WHOOPS message
+				cp 1
+				call z,GotchaWhoosh	; Or Gotcha if totally dead 
+				pop af
+				ld (hl)," "			; Remove shield from map
+				
+				ld hl,CurrentShieldCode		; If current shield was killed
+ThisShield:		ld a,0
+				cp (hl)
+				jr nz,QuitExplodeShield
+				call SwapShields	;		Try swapping to other shield (will return if only one left)
+				
+QuitExplodeShield:
+				call DecShieldsRemaining	;	Decrease shields left
+							
+				pop hl					; Mainloop will handle game over message if no shields left
+				pop de
+				pop bc
+				pop af
+				ret
+				
+				
+CheckDollyLeft:
+				dec hl				; 	Find new position for dolly
+				ld a," "			;	Only move if nothing stopping it
+				cp (hl)
+				jr z,MoveDollyLeft
+				inc hl				;	If dolly has stopped, turn back into D for stationery dolly
+				ld (hl),"D"
+				xor a
+				ret
+	MoveDollyLeft:
+				ld a,"7"
+				ld (hl),a			; 	If we're moving, put the new position in the map
+				call PrintGfxFromAddress
+				inc hl
+				ld a," "
+				ld (hl),a			;	And clear off the old position
+				call PrintGfxFromAddress
+				call StoreTopRightDirtyCell
+				inc e
+				
+				xor a
+				ret
+				
+CheckDollyRight:
+				inc hl				; 	Find new position for dolly
+				ld a," "			;	Only move if nothing stopping it
+				cp (hl)
+				jr z,MoveDollyRight
+				dec hl
+				ld (hl),"D"
+				xor a
+				ret
+	MoveDollyRight:
+				ld a,"8"
+				ld (hl),a			; 	If we're moving, put the new position in the map
+				call PrintGfxFromAddress
+				dec hl
+				ld a," "
+				ld (hl),a			;	And clear off the old position
+				call PrintGfxFromAddress
+				call StoreTopRightDirtyCell
+				inc e
+				
+				xor a
+				ret
+				
+CheckDollyUp:
+				push bc
+				ld bc,32
+				and a
+				sbc hl,bc
+				ld a," "
+				cp (hl)
+				jr z,MoveDollyUp
+				xor a
+				add hl,bc
+				ld (hl),"D"
+				pop bc
+				xor a
+				ret
+	MoveDollyUp:
+				ld a,"9"
+				ld (hl),a
+				call PrintGfxFromAddress
+				add hl,bc
+				ld a," "
+				ld (hl),a
+				call PrintGfxFromAddress
+				call StoreTopRightDirtyCell
+				inc e
+				
+				pop bc
+				xor a
+				ret
+				
+CheckDollyDown:
+				push bc
+				ld bc,32
+				add hl,bc
+				ld a," "
+				cp (hl)
+				jr z,MoveDollyDown
+				xor a
+				sbc hl,bc
+				ld (hl),"D"
+				pop bc
+				xor a
+				ret
+	MoveDollyDown:
+				ld a,"0"
+				ld (hl),a
+				call PrintGfxFromAddress
+				xor a
+				sbc hl,bc
+				ld a," "
+				ld (hl),a
+				call PrintGfxFromAddress
+				call StoreTopRightDirtyCell
+				inc e
+
+				
+				pop bc
+				xor a
+				ret
+				
+ExplodeOHoriz:
+				call DrawMapFull
+				call ResetTopRightDirtyCell
+				
+				dec hl
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				inc hl
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				inc hl
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				
+				call ExplodeAnim
+				ld a,(ShieldExploded)
+				cp Yes
+				call z,ExplodeShield2
+				
+				inc e
+				inc e
+				inc e
+				call DrawMapFull
+				xor a
+				ret
+				
+ExplodeOVert:
+				call DrawMapFull
+				call ResetTopRightDirtyCell
+
+				dec hl
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				inc hl
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				push bc
+				xor a
+				sbc hl,bc
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				add hl,bc
+				pop bc
+				inc hl
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				
+				call ExplodeAnim
+				ld a,(ShieldExploded)
+				cp Yes
+				call z,ExplodeShield2
+				
+				inc e
+				inc e
+				inc e
+				inc e
+				call DrawMapFull
+				xor a
+				ret
+				
+ExplodeXHoriz:
+				call DrawMapFull
+				call ResetTopRightDirtyCell
+				
+				push bc
+				ld bc,32
+				xor a
+				sbc hl,bc
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				add hl,bc
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				inc hl
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				dec hl
+				add hl,bc
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				pop bc
+				
+				call ExplodeAnim
+				ld a,(ShieldExploded)
+				cp Yes
+				call z,ExplodeShield2
+				
+				inc e
+				inc e
+				inc e
+				inc e
+				call DrawMapFull
+				xor a
+				ret
+				
+ExplodeXVert:
+				call DrawMapFull
+				call ResetTopRightDirtyCell
+				
+				push bc
+				ld bc,32
+				xor a
+				sbc hl,bc
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				add hl,bc
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				add hl,bc
+				ld a,(hl)
+				cp "1"
+				call z,ExplodeShield
+				cp "2"
+				call z,ExplodeShield
+				ld (hl),"B"
+				pop bc
+				
+				call ExplodeAnim
+				ld a,(ShieldExploded)
+				cp Yes
+				call z,ExplodeShield2
+				
+				inc e
+				inc e
+				inc e
+				call DrawMapFull
+				xor a
+				ret
+				
+ExplodeAnim:
+				push af
+				push bc
+				push de
+				push hl
+				
+				ld a,15
+				out (BorderReg),a
+				
+				ld b,5
+				ld hl,ExplodeAnimAddress
+				ld de,CurrentBombAnimSource
+ExplodeAnimLoop:
+				ld c,2
+				ldi
+				ldi
+				dec de
+				dec de
+				call DrawMapFull
+				call WaitforFrame
+				djnz ExplodeAnimLoop
+				
+				ld c,32
+				ld hl,CurrentMap
+ClearBombAnimLoop2:
+				ld b,32
+ClearBombAnimLoop:
+				ld a,(hl)
+				cp "B"
+				jr nz,SkipClearBombAnim
+				ld (hl)," "
+SkipClearBombAnim:
+				inc hl
+				djnz ClearBombAnimLoop
+				dec c
+				jr nz,ClearBombAnimLoop2
+				
+				xor a
+				out (BorderReg),a
+				
+				pop hl
+				pop de
+				pop bc
+				pop af
+				ret
+				
+CurrentBombAnimSource: dw 0
+				
+ExplodeAnimAddress:
+				dw gfx+96
+				dw gfx+108
+				dw gfx+3072+84
+				dw gfx+3072+96
+				dw gfx+3072+108
