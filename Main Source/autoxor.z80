@@ -139,7 +139,7 @@ FillInLevelTable:
 				ld (hl),a		; Store letter in level table
 				inc hl
 				inc hl
-				ex hl,de
+				ex de,hl
 				
 				ld hl,MovesTakenMess
 				ldi
